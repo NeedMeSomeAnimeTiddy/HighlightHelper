@@ -25,6 +25,7 @@ export const CONTEXT_TOOLS = [
 
   { type: 'separator' },
 
+  { id: 'highlight', title: 'Highlight this' },
   { id: 'link', title: 'Link to this text' },
   { id: 'search', title: 'Search with…' },
 
@@ -122,6 +123,7 @@ export const TOOL_HINTS = {
   texttools: 'Text tools needs a few characters of text.',
   qr: "That selection is too long, or isn't the kind of thing worth scanning.",
   dictionary: 'Define works on a single word — for a phrase or an acronym, try "Explain this".',
+  highlight: 'Highlighting needs a few words of text on an ordinary web page, in a browser that supports the CSS Custom Highlight API.',
   link: 'A link to a highlight only works on an ordinary web page, on a selection of a few words.',
   search: 'Searching needs a short selection, and at least one site turned on in settings.',
   speak: 'Reading aloud needs some actual prose, and this browser has to support speech.'

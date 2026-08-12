@@ -35,14 +35,15 @@ selection actually is:
 | Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
 | A paragraph or more | *Summarise* and *Key points*, both with **Find a source** | Yes, when you pick the row |
 | A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual / Continue writing, each with **Copy** and **Replace** | Yes, when you pick a tone |
+| Any prose | *Highlight this* → four colours and a note; it comes back on your next visit | No — local |
 | A single word | *Define* → part of speech, senses and examples from Wiktionary, plus **Say it** and **Synonyms** | No — keyless API |
 | Any prose | *Link to this text* → a `#:~:text=` URL that scrolls to and highlights exactly this | No — local |
 | Any prose | *Search with…* → Google, DuckDuckGo, Wikipedia, YouTube and whatever else you add | No — local |
 | Any prose | *Read aloud* → the browser's own voice | No — local |
 | Any text | *Text tools* → counts and reading time; UPPER / lower / Title / Sentence / camel / Pascal / snake / kebab / slug; sort, reverse, dedupe and join lines; every email, link or number in the selection; SHA-256 | No — local |
 
-Sixteen of the twenty tools never touch the network. Each can be switched off
-individually in settings.
+Seventeen of the twenty-one tools never touch the network. Each can be switched
+off individually in settings.
 
 The other four need a model, and there are two ways to get one. Chrome can run
 **Gemini Nano on your machine** — no key, no cost, and the selection never leaves
@@ -210,6 +211,7 @@ Everything below lives in `chrome.storage.sync` except the API key.
 - **Gallons, pints and fluid ounces** — US or UK. A UK pint is ~20% larger, so this matters
 - **My language** — translations and explanations come back in this language, and text that
   looks like it's in a *different* language pushes the Translate tab to the front
+- **Highlights** — the whole library, grouped by page, with delete and Markdown export
 - **Tools** — turn individual detectors off
 - **Search with…** — which sites the search row offers, plus your own; an entry is a name
   and a URL with `{q}` where the selection goes
@@ -290,6 +292,38 @@ Three things worth knowing:
 If the content script isn't running on the page at all, the worker injects it and retries
 once — that's what the `scripting` permission is for. Some targets can never be reached
 whatever we do: Chrome's PDF viewer, `chrome://` pages, and the Web Store.
+
+## Highlights
+
+Select text, pick **Highlight this**, choose a colour. It is saved in this browser and
+painted again the next time you open that page. Add a note if you want one. The full library
+is on the options page, with **Export as Markdown**.
+
+**Nothing is inserted into the page.** Every other tool in this category wraps highlighted
+text in `<mark>` elements, and that is where they all break — nodes appearing from nowhere
+fight the site's own scripts, invalidate its component tree, break `:nth-child` rules and
+occasionally rearrange the thing you were trying to read. This uses the **CSS Custom
+Highlight API**, which colours a Range without touching the DOM. The page's structure after
+a highlight is identical to before it.
+
+The cost of that is real: a painted range is not an element, so **you cannot click or hover a
+highlight**. There is no "click it to see the note". Re-select the text to get the row back,
+or use the library. Given the alternative is mutating every page you read, that is the right
+way round.
+
+One stylesheet is added to the page, which is unavoidable — `::highlight()` rules have to
+live in the document whose ranges they colour, so they cannot go in the panel's shadow root.
+
+**Finding a highlight again.** The text is stored with the words that surrounded it, and
+`content/locate.js` searches for that combination. It survives the page gaining a paragraph
+above it, which is the ordinary case. When the text is genuinely gone — or when it now
+appears several times and the context no longer picks one out — the highlight stays in the
+library marked as not found. It is never quietly reattached to whichever paragraph scored
+best. That is the same refusal *Find a source* makes about citations and *Link to this text*
+makes about fragments: a confident wrong answer is worse than an honest missing one.
+
+Single-page apps replace their content without a navigation, which detaches every range. A
+debounced `MutationObserver` re-finds them.
 
 ## Find a source
 
@@ -393,6 +427,7 @@ src/
     prompts.js                the prompts, shared by both providers
     cache.js                  TTL + LRU cache over chrome.storage.local
     searchengines.js          the "Search with…" defaults and URL templating
+    highlights-store.js       saved highlights, per origin, + Markdown export
   background/
     service-worker.js         message router, context menu, keyboard command
     deepseek.js               chat-completions client (owns the key)
@@ -405,6 +440,8 @@ src/
     local-ai.js               Chrome's built-in model; api.ai() tries it first
     anchor.js                 find this text in the page, unambiguously
     speech.js                 read aloud, via speechSynthesis
+    locate.js                 find saved text again, as a real DOM Range
+    highlights.js             paint them via the CSS Custom Highlight API
     kit.js                    el(), menu(), and the shared UI pieces
     icons.js                  monochrome 16px SVG glyphs
     qr.js                     QR encoder — byte mode, level M, versions 1-20
@@ -414,7 +451,8 @@ src/
       color.js  datetime.js  currency.js  coords.js  calc.js
       numberbase.js  regex.js  unit.js  code.js  decode.js
       translate.js  jargon.js  summarize.js  rewrite.js  qr.js
-      dictionary.js  link.js  search.js  speak.js  texttools.js
+      dictionary.js  highlight.js  link.js  search.js  speak.js
+      texttools.js
       langdetect.js           small script/stopword language guesser
       codelang.js             "is this code, and which language?"
   options/                    options page
@@ -422,6 +460,9 @@ src/
 test/
   detectors.test.js           node test/detectors.test.js
   qr-roundtrip.js             independent QR reader, used by the tests
+  locate-browser.html         the DOM half of highlights; needs a browser
+tools/
+  static-server.js            serves the repo so that page can import modules
 ```
 
 **Why the loader indirection.** Manifest content scripts can't be declared as ES modules, so
@@ -668,6 +709,21 @@ The tests cover `matches()` and `items()`, which is where the fiddly logic lives
 lazy, so rows can be inspected without a DOM. The rendering and selection machinery is not
 covered — load the extension and try it.
 
+Some things cannot be checked without a browser: real text nodes, real Ranges, and whether
+the CSS Custom Highlight API does what it claims. Those live in a page of their own.
+
+```bash
+node tools/static-server.js
+```
+
+Then open `http://localhost:8712/test/locate-browser.html` — the title bar says how many
+passed. It imports the real modules rather than a copy, so it cannot drift from them, and it
+needs an origin because ES modules do not load over `file://`. It covers the cases Node
+can't reach: text spanning inline elements, a phrase that appears twice being refused, a
+highlight surviving a paragraph appearing above it, and the fact that painting inserts no
+elements. This is the same role `qr-roundtrip.js` plays for the QR encoder — the check that
+closes the gap between "self-consistent" and "actually works".
+
 Node has none of the built-in AI globals, which makes it exactly the unsupported-browser case
 — so the provider tests assert the contract that matters there: `runLocal` *declines* rather
 than throwing, which is what lets `auto` fall through to DeepSeek. What Node cannot check is
@@ -759,3 +815,15 @@ Sketched and deliberately left out, roughly in order of how useful they'd be:
   text's language. It is not worth an event listener to fix a one-time accent.
 - **Extraction finds shapes, not meaning.** "Numbers" will happily pull the 3 out of "COVID-19
   in 3 charts". It never invents anything, but it doesn't know what it found.
+- **A highlight cannot be clicked.** It is a painted Range, not an element, so there is
+  nothing on the page to hover or click. That is the price of not mutating the DOM, and it is
+  paid deliberately. Re-select the text, or use the library.
+- **Highlights are per browser, per machine.** `chrome.storage.local`, no sync and no server.
+  Sync has a 100 KB quota and would race between machines; a server would need an account.
+  Export to Markdown is the way to get them out.
+- **A highlight can be lost.** If the page rewrites the passage, or the text now appears
+  several times and the stored context no longer picks one out, it stays in the library marked
+  as not found rather than being reattached to a guess. Sites that rebuild their DOM
+  constantly may lose highlights between visits.
+- **The CSS Custom Highlight API is required.** Chrome and Edge 105+, Safari 17.2+. Firefox
+  has it from 140. Without it the Highlight row simply doesn't appear.

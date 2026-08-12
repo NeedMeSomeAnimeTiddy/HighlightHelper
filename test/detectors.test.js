@@ -30,6 +30,8 @@ import { buildTextFragment, occurrences, normalise, encodePart }
   from '../src/content/anchor.js';
 import { searchUrlFor, resolveEngines } from '../src/common/searchengines.js';
 import { shapeDefinitions, wiktLang } from '../src/background/dictionary.js';
+import { flexiblePattern } from '../src/content/locate.js';
+import { pageKey, hostKey, toMarkdown } from '../src/common/highlights-store.js';
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import { AI, ERR } from '../src/common/constants.js';
 import { parseTopics } from '../src/common/text.js';
@@ -69,9 +71,12 @@ globalThis.location ??= {
 };
 globalThis.speechSynthesis ??= { getVoices: () => [], cancel() {}, speak() {}, speaking: false };
 globalThis.SpeechSynthesisUtterance ??= function SpeechSynthesisUtterance() {};
+globalThis.CSS ??= { highlights: new Map() };
+globalThis.Highlight ??= function Highlight() {};
 
 const { default: link } = await import('../src/content/detectors/link.js');
 const { default: speak } = await import('../src/content/detectors/speak.js');
+const { default: highlight } = await import('../src/content/detectors/highlight.js');
 
 let passed = 0;
 const failures = [];
@@ -681,6 +686,7 @@ const topLevelKeys = new Set([
   ...rows(dictionary, 'serendipity').map((r) => r.key),
   ...rows(search, 'quantum entanglement').map((r) => r.key),
   ...rows(link, 'a phrase worth linking to').map((r) => r.key),
+  ...rows(highlight, 'a sentence worth highlighting').map((r) => r.key),
   ...rows(speak, 'a sentence worth reading aloud').map((r) => r.key),
   ...ttRows.map((r) => r.key)
 ]);
@@ -804,6 +810,41 @@ check('decimal and hex entities decode', entities('a &#8212; b &#x2014; c')?.tex
 check('an unknown entity is left alone', entities('&notareal; thing'), null);
 // Surrogate halves are not characters; writing them out is the honest answer.
 check('a surrogate code point is not decoded', entities('&#xD800; here'), null);
+
+/* ---------- highlights ---------- */
+
+// Whitespace in the needle has to match whatever the page does with it: HTML
+// collapses runs, and a source line break renders as a space.
+check('whitespace in a pattern matches any run',
+  flexiblePattern('the  quick\n brown'), 'the\\s+quick\\s+brown');
+check('regex metacharacters are escaped, not interpreted',
+  flexiblePattern('cost (USD) $5.00 [net]'), 'cost\\s+\\(USD\\)\\s+\\$5\\.00\\s+\\[net\\]');
+check('nothing to match on yields no pattern', flexiblePattern('   '), null);
+// The DOM half of this — real Ranges, real text nodes, and the fact that a
+// full stop sits between a highlight and the words after it — is checked in
+// test/locate-browser.html, which Node cannot run.
+
+// The hash is never part of a page's identity; the query string usually is.
+check('the fragment is not part of a page key',
+  pageKey('https://e.com/a?b=1#section'), 'https://e.com/a?b=1');
+check('the host comes off the URL', hostKey('https://e.com/a?b=1'), 'e.com');
+
+// Export exists so a quote can be traced back to where it came from.
+const MD = toMarkdown([{
+  host: 'e.com',
+  items: [
+    { id: '1', url: 'https://e.com/a', title: 'A Title', text: 'first quote', note: 'my note', createdAt: 2 },
+    { id: '2', url: 'https://e.com/a', title: 'A Title', text: 'second quote', note: '', createdAt: 1 }
+  ]
+}]);
+check('export heads each page with a real link', MD.includes('## [A Title](https://e.com/a)'), true);
+check('export quotes the highlight', MD.includes('> first quote'), true);
+check('export keeps the note', MD.includes('my note'), true);
+check('export orders by when they were made',
+  MD.indexOf('second quote') < MD.indexOf('first quote'), true);
+check('markdown control characters in a title are escaped',
+  toMarkdown([{ host: 'e.com', items: [{ id: '1', url: 'https://e.com/', title: 'A [b] *c*', text: 'x', createdAt: 1 }] }])
+    .includes('A \\[b\\] \\*c\\*'), true);
 
 /* ---------- providers ---------- */
 

@@ -1,6 +1,7 @@
 import { getSettings, saveSettings, getApiKey } from '../common/settings.js';
 import { MSG, PROVIDER } from '../common/constants.js';
 import { localStatus } from '../content/local-ai.js';
+import { forPage } from '../common/highlights-store.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -47,6 +48,27 @@ async function renderProviderState() {
     state.textContent = 'No AI provider yet — the local tools still work. See settings.';
     state.className = 'key bad';
   }
+}
+
+/**
+ * How many highlights are saved for the page in front of you.
+ *
+ * Read from storage rather than asked of the content script, so it still
+ * answers on a page where the script never loaded — which is exactly when
+ * someone would be wondering where their highlights went.
+ */
+async function renderHighlightState() {
+  const row = $('highlightState');
+  const tab = await activeTab();
+  if (!tab?.url) return;
+
+  const here = await forPage(tab.url);
+  if (!here.length) return;
+
+  row.textContent = here.length === 1
+    ? '1 highlight saved on this page'
+    : `${here.length} highlights saved on this page`;
+  row.hidden = false;
 }
 
 /** Opera and Opera GX both carry OPR/ in the UA and share the same restriction. */
@@ -216,6 +238,7 @@ async function refreshStatus() {
   });
 
   renderProviderState();
+  renderHighlightState();
 
   $('settings').addEventListener('click', () => {
     chrome.runtime.openOptionsPage();

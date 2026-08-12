@@ -391,6 +391,60 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Highlight colours. Circles rather than squares so they read as ink, not UI. */
+.hh-swatches {
+  gap: 8px;
+}
+
+.hh-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--hh-border);
+  border-radius: 50%;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.hh-swatch:hover {
+  transform: scale(1.08);
+}
+
+.hh-swatch--on {
+  box-shadow: 0 0 0 2px var(--hh-accent);
+}
+
+/* The same values highlights.js paints with, so the swatch is not a lie. */
+.hh-swatch--yellow { background: rgba(255, 214, 0, 0.75); }
+.hh-swatch--green  { background: rgba(64, 214, 122, 0.7); }
+.hh-swatch--blue   { background: rgba(88, 166, 255, 0.7); }
+.hh-swatch--pink   { background: rgba(255, 121, 198, 0.7); }
+
+/* A tick on a pale swatch has to be dark, whatever the panel's text colour is. */
+.hh-swatch-tick {
+  color: #1a1a1a;
+}
+
+.hh-note-input {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--hh-border);
+  border-radius: 6px;
+  background: var(--hh-hover);
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+.hh-note-input:focus {
+  outline: 2px solid var(--hh-accent);
+  outline-offset: -1px;
+}
+
 /* Dictionary: the part of speech heading, then its numbered senses. */
 .hh-pos {
   margin-top: 10px;

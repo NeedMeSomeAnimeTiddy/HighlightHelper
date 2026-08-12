@@ -200,7 +200,29 @@ The menu-id test catches anything skipped, which is the point of it.
 
 ---
 
-## Phase 3 — Highlights
+## Phase 3 — Highlights ✅ built
+
+*Shipped. Painted with the CSS Custom Highlight API, re-found with `content/locate.js`,
+stored per origin, with a library and Markdown export on the options page.*
+
+**What differed from the plan.** `anchor.js` turned out to cover only half the problem —
+it answers "is this string unique" over text, which is all a link needs, but repainting
+needs a real `Range` in a live DOM. `content/locate.js` is that second half, and the two
+stay apart so `anchor.js` remains testable in Node.
+
+The same punctuation bug from Phase 2 reappeared in a new place and had to be found twice:
+the joiner between a highlight and its stored context was `\s+`, which cannot cross the full
+stop in "…on the mat." / "Later the dog…" — the single most ordinary case there is. It is a
+bounded whitespace-or-punctuation run now. A browser test caught it; the Node suite could
+not have.
+
+**`test/locate-browser.html` is new**, plus `tools/static-server.js` to serve it. Sixteen
+assertions over things Node cannot reach — text spanning inline elements, ambiguity being
+refused, a highlight surviving a paragraph appearing above it, and painting inserting no
+elements. Same role `qr-roundtrip.js` plays for the encoder.
+
+**Still unverified:** the full loop through `chrome.storage` — saving on one visit and
+repainting on the next — and the library and export UI. Those need the extension loaded.
 
 The feature the extension is named after. Save a selection, restore it on the next visit,
 attach a note and a colour, browse the lot, export to Markdown.

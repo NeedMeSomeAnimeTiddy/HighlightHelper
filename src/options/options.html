@@ -122,6 +122,22 @@
     </section>
 
     <section class="card">
+      <h2>Highlights</h2>
+      <p class="hint">
+        Everything you have highlighted, grouped by page. Saved in this browser only — no
+        account, no server, nothing synced.
+      </p>
+
+      <div class="row">
+        <button id="exportHighlights" type="button">Export as Markdown</button>
+        <button id="clearHighlights" type="button" class="ghost">Delete all</button>
+        <span id="highlightStatus" class="status" role="status"></span>
+      </div>
+
+      <ul class="library" id="highlightLibrary"></ul>
+    </section>
+
+    <section class="card">
       <h2>Search with…</h2>
       <p class="hint">
         Which sites the <strong>Search with…</strong> row offers. Opening one sends the

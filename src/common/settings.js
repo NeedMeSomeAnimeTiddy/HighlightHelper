@@ -42,6 +42,7 @@ export const DEFAULTS = {
     summarize: true,
     rewrite: true,
     qr: true,
+    highlight: true,
     link: true,
     search: true,
     speak: true,

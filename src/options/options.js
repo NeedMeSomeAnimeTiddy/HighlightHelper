@@ -11,6 +11,13 @@ import { MSG, ERR, PROVIDER } from '../common/constants.js';
 import { LIST as DETECTOR_LIST } from '../content/detectors/index.js';
 import { localStatus, downloadModel } from '../content/local-ai.js';
 import { DEFAULT_ENGINES } from '../common/searchengines.js';
+import {
+  all as allHighlights,
+  remove as removeHighlight,
+  clearAll as clearHighlights,
+  stats as highlightStats,
+  toMarkdown
+} from '../common/highlights-store.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,6 +38,7 @@ const DETECTOR_BLURB = {
   rewrite: 'Fix grammar, rewrite in another tone, or continue writing. Uses AI.',
   qr: 'Turns a link or short text into a scannable QR code. Local.',
   dictionary: 'Definitions and synonyms for a single word. Free — Wiktionary, no key.',
+  highlight: 'Saves a highlight and paints it again on your next visit. Local, stored in this browser.',
   link: 'Copies a URL that scrolls to and highlights this exact text. Local.',
   search: 'Opens the selection in a search engine or reference site. Local.',
   speak: "Reads the selection aloud with the browser's own voice. Local.",
@@ -126,6 +134,124 @@ function wireDetectors() {
       return li;
     })
   );
+}
+
+/* ---------- highlights library ---------- */
+
+function highlightEntry(item, onChanged) {
+  const li = document.createElement('li');
+  li.className = 'library-item';
+
+  const swatch = document.createElement('span');
+  swatch.className = `library-dot library-dot--${item.color || 'yellow'}`;
+
+  const body = document.createElement('div');
+  const quote = document.createElement('blockquote');
+  quote.textContent = item.text;
+  body.append(quote);
+
+  if (item.note) {
+    const note = document.createElement('p');
+    note.className = 'library-note';
+    note.textContent = item.note;
+    body.append(note);
+  }
+
+  const when = document.createElement('span');
+  when.className = 'desc';
+  when.textContent = new Date(item.createdAt).toLocaleDateString();
+  body.append(when);
+
+  const remove = document.createElement('button');
+  remove.className = 'ghost';
+  remove.textContent = 'Delete';
+  remove.addEventListener('click', async () => {
+    await removeHighlight(item.url, item.id);
+    onChanged();
+  });
+
+  li.append(swatch, body, remove);
+  return li;
+}
+
+async function renderLibrary() {
+  const list = $('highlightLibrary');
+  const groups = await allHighlights();
+
+  if (!groups.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'Nothing highlighted yet. Select text on a page and pick Highlight this.';
+    list.replaceChildren(li);
+    return;
+  }
+
+  const nodes = [];
+  for (const group of groups) {
+    // Grouped by page rather than by site: a highlight's context is the article
+    // it came from, and a site with fifty pages would otherwise be one long list.
+    const byPage = new Map();
+    for (const item of group.items) {
+      if (!byPage.has(item.url)) byPage.set(item.url, []);
+      byPage.get(item.url).push(item);
+    }
+
+    for (const [url, items] of byPage) {
+      const head = document.createElement('li');
+      head.className = 'library-page';
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noreferrer noopener';
+      link.textContent = items[0].title || url;
+      head.append(link);
+      nodes.push(head);
+
+      for (const item of items.slice().sort((a, b) => a.createdAt - b.createdAt)) {
+        nodes.push(highlightEntry(item, renderLibrary));
+      }
+    }
+  }
+
+  list.replaceChildren(...nodes);
+}
+
+function wireHighlights() {
+  renderLibrary();
+
+  $('exportHighlights').addEventListener('click', async () => {
+    const groups = await allHighlights();
+    if (!groups.length) {
+      flash($('highlightStatus'), 'Nothing to export yet.', 'bad');
+      return;
+    }
+
+    // A blob and a click, so the file never touches the network.
+    const blob = new Blob([toMarkdown(groups)], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `highlights-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    flash($('highlightStatus'), 'Exported.', 'ok');
+  });
+
+  $('clearHighlights').addEventListener('click', async () => {
+    // Deleting every highlight is not recoverable and not obviously reversible
+    // from the button's label alone, so it asks first.
+    const { items } = await highlightStats();
+    if (!items) {
+      flash($('highlightStatus'), 'Nothing to delete.', 'bad');
+      return;
+    }
+    if (!confirm(`Delete all ${items} saved highlights? This cannot be undone.`)) return;
+
+    await clearHighlights();
+    await renderLibrary();
+    flash($('highlightStatus'), `Deleted ${items}.`, 'ok');
+  });
 }
 
 /* ---------- search engines ---------- */
@@ -427,6 +553,7 @@ function renderSites() {
   wireProvider();
   wireDetectors();
   wireSearchEngines();
+  wireHighlights();
   renderSites();
   wireCache();
   await wireApiKey();

@@ -58,11 +58,12 @@ import dictionary from './dictionary.js';
 import search from './search.js';
 import link from './link.js';
 import speak from './speak.js';
+import highlight from './highlight.js';
 
 export const LIST = [
   color, datetime, currency, coords, calc, numberbase, regex, unit,
   code, decode, dictionary, translate, jargon, summarize, rewrite, qr,
-  link, search, speak, texttools
+  highlight, link, search, speak, texttools
 ];
 
 export function getDetector(id) {

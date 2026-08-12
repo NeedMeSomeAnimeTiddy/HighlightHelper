@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Highlight Helper — locate() and painting</title>
+  <style>
+    body { font: 15px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+    .pass { color: #1a7f4b; }
+    .fail { color: #c0392b; font-weight: 600; }
+    #results { list-style: none; padding: 0; font-family: ui-monospace, monospace; font-size: 13px; }
+    #results li { padding: 2px 0; }
+    article { border: 1px solid #ddd; padding: 1rem; border-radius: 6px; }
+    ::highlight(demo) { background-color: rgba(255, 214, 0, 0.45); }
+  </style>
+</head>
+<body>
+  <h1>locate() and painting</h1>
+  <p>
+    The parts of the highlight feature that cannot be tested in Node: walking real text
+    nodes, building real Ranges, and painting them with the CSS Custom Highlight API.
+    <strong>Open this file over http, not as a <code>file://</code> URL</strong> — ES modules
+    need an origin.
+  </p>
+
+  <h2>Fixture</h2>
+  <article id="fixture">
+    <p>The cat sat on the mat. Later the dog sat on the mat too.</p>
+    <p>Nothing else happened that day, and the <em>cat</em> was <strong>quite</strong> content.</p>
+    <p>The cat sat on the mat.</p>
+    <script>/* a script node, which must never be searched */ var ignored = 'cat sat';</script>
+  </article>
+
+  <h2>Results</h2>
+  <ul id="results"></ul>
+  <p id="summary"></p>
+
+  <script type="module">
+    import { locate, contextFor, collectText, flexiblePattern } from '../src/content/locate.js';
+
+    const results = document.getElementById('results');
+    let passed = 0;
+    let failed = 0;
+
+    function check(label, actual, expected) {
+      const ok = JSON.stringify(actual) === JSON.stringify(expected);
+      const li = document.createElement('li');
+      li.className = ok ? 'pass' : 'fail';
+      li.textContent = ok
+        ? `PASS  ${label}`
+        : `FAIL  ${label}\n        expected ${JSON.stringify(expected)}\n        got      ${JSON.stringify(actual)}`;
+      li.style.whiteSpace = 'pre';
+      results.append(li);
+      ok ? passed++ : failed++;
+    }
+
+    const root = document.getElementById('fixture');
+
+    /* --- collectText --- */
+
+    const index = collectText(root);
+    check('script contents are not collected', index.text.includes('var ignored'), false);
+    check('paragraph text is collected', index.text.includes('Nothing else happened'), true);
+    // Without a separator, "content." + the next node would concatenate into a
+    // word that is not on the page.
+    check('nodes are separated', /mat\.\s/.test(index.text), true);
+
+    /* --- locate: unambiguous --- */
+
+    const unique = locate({ text: 'Nothing else happened' }, root);
+    check('an unambiguous phrase is found', unique?.toString(), 'Nothing else happened');
+
+    /* --- locate: spanning inline elements --- */
+
+    // "the cat was quite content" is split across text, <em> and <strong>.
+    const spanning = locate({ text: 'the cat was quite content' }, root);
+    check('a phrase spanning inline elements is found',
+      spanning?.toString().replace(/\s+/g, ' '), 'the cat was quite content');
+
+    /* --- locate: ambiguous without context --- */
+
+    // "The cat sat on the mat." appears twice, so this must refuse.
+    check('an ambiguous phrase alone is refused',
+      locate({ text: 'The cat sat on the mat' }, root), null);
+
+    /* --- locate: ambiguous with context --- */
+
+    const withContext = locate({
+      text: 'The cat sat on the mat',
+      suffix: 'Later the dog'
+    }, root);
+    check('context resolves an ambiguous phrase', withContext?.toString(), 'The cat sat on the mat');
+
+    /* --- locate: absent --- */
+
+    check('text that is gone returns null', locate({ text: 'no such words here' }, root), null);
+
+    /* --- whitespace flexibility --- */
+
+    // The stored text may have had its whitespace collapsed differently.
+    check('whitespace differences do not prevent a match',
+      locate({ text: 'Nothing   else\n happened' }, root)?.toString(), 'Nothing else happened');
+
+    /* --- contextFor round trip --- */
+
+    const range = locate({ text: 'Later the dog sat' }, root);
+    const context = contextFor(range, root);
+    check('context is captured either side',
+      [context.prefix.length > 0, context.suffix.length > 0], [true, true]);
+    check('captured context finds the text again',
+      locate({ text: 'Later the dog sat', ...context }, root)?.toString(), 'Later the dog sat');
+
+    /* --- surviving a changed page --- */
+
+    // The reason context is stored at all: a page that gains content above a
+    // highlight must not lose it. This is the ordinary case — an ad slot, a
+    // lazy-loaded image caption, a comment count.
+    const target = { text: 'Later the dog sat', ...contextFor(locate({ text: 'Later the dog sat' }, root), root) };
+    const inserted = document.createElement('p');
+    inserted.textContent = 'An entirely new paragraph that appeared later, mentioning a dog.';
+    root.prepend(inserted);
+
+    check('a highlight survives content appearing above it',
+      locate(target, root)?.toString(), 'Later the dog sat');
+
+    inserted.remove();
+
+    // And when the text really is gone, it says so rather than picking the
+    // nearest thing that scored well.
+    const removed = root.lastElementChild;
+    const kept = removed.textContent;
+    removed.remove();
+    check('text that has actually gone is reported missing, not guessed at',
+      locate({ text: 'a phrase only in the removed node' }, root), null);
+    const restored = document.createElement('p');
+    restored.textContent = kept;
+    root.append(restored);
+
+    /* --- painting --- */
+
+    const supported = typeof CSS !== 'undefined' && 'highlights' in CSS && typeof Highlight === 'function';
+    check('the CSS Custom Highlight API is available', supported, true);
+
+    if (supported && unique) {
+      CSS.highlights.set('demo', new Highlight(unique));
+      check('the highlight registry accepts the range', CSS.highlights.has('demo'), true);
+      // The whole point of this API: nothing was inserted into the document.
+      check('painting inserted no elements', root.querySelectorAll('mark, span').length, 0);
+    }
+
+    const summary = document.getElementById('summary');
+    summary.textContent = `${passed} passed, ${failed} failed`;
+    summary.className = failed ? 'fail' : 'pass';
+    document.title = `${failed ? 'FAIL' : 'OK'} — ${passed} passed, ${failed} failed`;
+  </script>
+</body>
+</html>

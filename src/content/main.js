@@ -20,6 +20,7 @@ import { detect, getDetector } from './detectors/index.js';
 import { el, menu, glyph, errorBox, note } from './kit.js';
 import { markGlyph } from './icons.js';
 import { runLocal, isSupported as localSupported } from './local-ai.js';
+import { restore as restoreHighlights, watch as watchHighlights } from './highlights.js';
 
 const MIN_CHARS = 2;
 const MAX_CHARS = 8000;
@@ -922,4 +923,18 @@ function onRuntimeMessage(msg, sender, sendResponse) {
   window.addEventListener('pagehide', hide);
 
   chrome.runtime.onMessage.addListener(onRuntimeMessage);
+
+  /*
+   * Saved highlights are repainted on load, and only then — this is the one
+   * thing the extension does without being asked, so it stays cheap and it
+   * stays off unless the site is enabled and the tool is on.
+   *
+   * It is deliberately not awaited: re-finding text walks the document, and
+   * nothing above should wait on it to start listening for selections.
+   */
+  if (settings.detectors.highlight !== false && isEnabledFor(settings, location.hostname)) {
+    restoreHighlights()
+      .then(({ found }) => { if (found) watchHighlights(); })
+      .catch((err) => console.warn('[Highlight Helper] could not restore highlights:', err));
+  }
 })();

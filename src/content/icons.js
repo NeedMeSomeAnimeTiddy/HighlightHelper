@@ -134,6 +134,11 @@ const PATHS = {
   speak: [
     'M3.4 6.2h2L8 3.8v8.4L5.4 9.8h-2z',
     'M10.4 6.2a2.6 2.6 0 0 1 0 3.6M12.2 4.4a5.1 5.1 0 0 1 0 7.2'
+  ],
+  // marker pen over a ruled line — highlight
+  highlight: [
+    'M4.1 9.7 9.8 4a1.7 1.7 0 0 1 2.4 2.4l-5.7 5.7-3 .6z',
+    'M2.6 14.2h10.8'
   ]
 };
 

@@ -135,4 +135,57 @@ button.ghost:hover { color: var(--fg); }
 .sites li:last-child { border-bottom: 0; }
 .sites .empty { color: var(--muted); font-size: 12.5px; border: 0; }
 
+/* Highlights library */
+.library { list-style: none; margin: 14px 0 0; padding: 0; }
+
+.library .empty { color: var(--muted); font-size: 12.5px; }
+
+.library-page {
+  margin: 16px 0 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.library-page:first-child { margin-top: 0; }
+.library-page a { color: var(--accent); text-decoration: none; }
+.library-page a:hover { text-decoration: underline; }
+
+.library-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.library-item > div { flex: 1; min-width: 0; }
+
+.library-item blockquote {
+  margin: 0;
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+  font-size: 13px;
+  line-height: 1.5;
+  /* A long highlight is a paragraph; the library is a list, not a reader. */
+  overflow-wrap: anywhere;
+}
+
+.library-note { margin: 5px 0 0; font-size: 12.5px; }
+.library-item .desc { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; }
+
+/* The same colours highlights.js paints with, at full strength on a dot. */
+.library-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+.library-dot--yellow { background: rgba(255, 214, 0, 0.75); }
+.library-dot--green  { background: rgba(64, 214, 122, 0.7); }
+.library-dot--blue   { background: rgba(88, 166, 255, 0.7); }
+.library-dot--pink   { background: rgba(255, 121, 198, 0.7); }
+
 .foot { text-align: right; min-height: 20px; }
