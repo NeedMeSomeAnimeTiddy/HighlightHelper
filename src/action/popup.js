@@ -27,14 +27,33 @@ function hostOf(tab) {
  * content scripts, and Chrome's per-extension "Site access" setting can be set
  * to On click, which stops them injecting at all.
  */
+/**
+ * A refusal from the browser's own extension policy. Chromium blocks scripting
+ * on hosts listed in ExtensionSettings → runtime_blocked_hosts, and browsers
+ * built on it ship their own built-in lists. Nothing an extension can do.
+ */
+function isPolicyBlock(err) {
+  return /cannot be scripted|ExtensionsSettings policy|blocked by the administrator/i
+    .test(String(err?.message || err));
+}
+
 async function probe(tab) {
   if (!tab?.id) return { state: 'unknown' };
   if (!hostOf(tab)) return { state: 'unsupported' };
   try {
     const res = await chrome.tabs.sendMessage(tab.id, { type: MSG.PING });
-    return res?.ok ? { state: 'running', info: res } : { state: 'absent' };
+    if (res?.ok) return { state: 'running', info: res };
   } catch {
+    /* no listener — work out whether we're even allowed to inject one */
+  }
+
+  // Distinguish "not injected yet" from "forbidden here" before offering a fix
+  // the browser will refuse. An empty function is the cheapest possible probe.
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => true });
     return { state: 'absent' };
+  } catch (err) {
+    return { state: isPolicyBlock(err) ? 'blocked' : 'absent' };
   }
 }
 
@@ -60,11 +79,21 @@ function renderStatus(result, tab) {
     return;
   }
 
+  if (result.state === 'blocked') {
+    dot.classList.add('bad');
+    text.textContent = 'Blocked by browser policy';
+    detail.textContent =
+      'Your browser forbids extensions from running on this site, so no extension can ' +
+      'work here. Open <browser>://policy and look at ExtensionSettings → ' +
+      'runtime_blocked_hosts to see the list.';
+    return;
+  }
+
   if (result.state === 'unsupported') {
     dot.classList.add('warn');
     text.textContent = "Can't run on this page";
     detail.textContent =
-      'Chrome blocks extensions on its own pages, the Web Store and PDFs.';
+      'Browsers block extensions on their own pages, the extension store and PDFs.';
     return;
   }
 
@@ -111,21 +140,27 @@ async function refreshStatus() {
   // Clicking the toolbar button granted activeTab, so this injection is allowed
   // even when the declared content script never ran.
   $('activate').addEventListener('click', async (e) => {
-    const tabId = Number(e.currentTarget.dataset.tabId);
-    e.currentTarget.disabled = true;
-    e.currentTarget.textContent = 'Activating…';
+    const button = e.currentTarget;
+    const tabId = Number(button.dataset.tabId);
+    button.disabled = true;
+    button.textContent = 'Activating…';
     try {
       await chrome.scripting.executeScript({
         target: { tabId, allFrames: true },
         files: ['src/content/loader.js']
       });
       await new Promise((r) => setTimeout(r, 250));
+      button.disabled = false;
+      button.textContent = 'Activate on this page';
+      refreshStatus();
     } catch (err) {
-      $('statusDetail').textContent = `Injection failed: ${err.message}`;
+      button.disabled = false;
+      button.textContent = 'Activate on this page';
+      // A policy refusal is final — no retry will help, so say what it means
+      // rather than showing the browser's raw wording.
+      if (isPolicyBlock(err)) renderStatus({ state: 'blocked' }, { id: tabId });
+      else $('statusDetail').textContent = `Couldn't inject: ${err.message}`;
     }
-    e.currentTarget.disabled = false;
-    e.currentTarget.textContent = 'Activate on this page';
-    refreshStatus();
   });
 
   const key = await getApiKey();

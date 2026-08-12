@@ -106,7 +106,8 @@ script is actually running in that tab:
 | **Active on this page** | It's working. Select some text to get the button. |
 | **Not running on this page** | See below — there's an **Activate on this page** button that fixes it immediately. |
 | **Switched off for this site** | You turned it off in this popup. The right-click menu still works. |
-| **Can't run on this page** | Chrome blocks extensions on its own pages, the Web Store and PDFs. Nothing to be done. |
+| **Blocked by browser policy** | The browser forbids extensions on this site. Nothing any extension can do — see below. |
+| **Can't run on this page** | Browsers block extensions on their own pages, the extension store and PDFs. |
 
 "Not running" has two ordinary causes, and neither prints anything in the page console, which
 is what makes it confusing:
@@ -120,6 +121,21 @@ is what makes it confusing:
 **Activate on this page** in the popup injects the content script into the current tab
 directly, which works in both cases — clicking the toolbar button grants the access needed.
 It lasts until you navigate away.
+
+### Blocked by browser policy
+
+Chromium refuses extension scripting on any host in `ExtensionSettings` →
+`runtime_blocked_hosts`, reporting *"This page cannot be scripted due to an ExtensionsSettings
+policy."* No extension can override it — not by injecting, not by permissions, not by any
+manifest setting.
+
+That list can come from an enterprise or school policy, but Chromium-based browsers that
+aren't Chrome also ship **their own built-in lists**, so this can appear on an ordinary
+personal machine with no policies configured at all. Opera and Opera GX are the usual
+examples. Open `<browser>://policy` and look at **ExtensionSettings** to see the list and
+where it came from.
+
+If the site you want is on it, the only real fix is a browser that doesn't block it.
 
 One console note: service worker errors do **not** appear in the page console. They're at
 `chrome://extensions` → Highlight Helper → **service worker**. If the right-click menu does
