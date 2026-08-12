@@ -1,0 +1,11 @@
+{
+  "name": "highlight-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension (MV3) that turns a text selection into conversions, explanations, translations, and rewrites.",
+  "type": "module",
+  "scripts": {
+    "test": "node test/detectors.test.js"
+  },
+  "//": "There is no build step and there are no dependencies. This file exists so Node treats the source as ES modules when running the tests; Chrome does not read it."
+}

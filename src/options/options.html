@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Highlight Helper — Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <img src="../../icons/icon48.png" alt="" width="36" height="36">
+      <div>
+        <h1>Highlight Helper</h1>
+        <p class="sub">Select text on any page to convert, explain, translate, or rewrite it.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>Preferences</h2>
+
+      <div class="field">
+        <label for="currency">Convert currencies into</label>
+        <select id="currency"></select>
+        <p class="hint">Amounts like <code>$50</code> or <code>30 EUR</code> are converted into this currency.</p>
+      </div>
+
+      <div class="field">
+        <label for="unitSystem">Preferred unit system</label>
+        <select id="unitSystem">
+          <option value="metric">Metric (km, kg, °C)</option>
+          <option value="imperial">Imperial (mi, lb, °F)</option>
+        </select>
+        <p class="hint">Measurements already in this system are converted the other way, so the answer is always the one you don't have.</p>
+      </div>
+
+      <div class="field">
+        <label for="imperialFlavor">Gallons, pints and fluid ounces</label>
+        <select id="imperialFlavor">
+          <option value="us">US</option>
+          <option value="uk">UK / imperial</option>
+        </select>
+        <p class="hint">A UK pint is about 20% larger than a US one, so this changes the numbers.</p>
+      </div>
+
+      <div class="field">
+        <label for="language">My language</label>
+        <select id="language"></select>
+        <p class="hint">Translations and explanations come back in this language.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>DeepSeek API key</h2>
+      <p class="hint">
+        Needed for the explain, translate, and rewrite tools. Currency and unit conversion work without it.
+        Get one at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer noopener">platform.deepseek.com</a>.
+        The key is stored in this browser's local extension storage only — it is never synced to your Google account and never committed to the source.
+      </p>
+
+      <div class="field">
+        <label for="apiKey">API key</label>
+        <div class="row">
+          <input id="apiKey" type="password" spellcheck="false" autocomplete="off"
+                 placeholder="sk-…">
+          <button id="toggleKey" type="button" class="ghost">Show</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="saveKey" type="button" class="primary">Save key</button>
+        <button id="testKey" type="button">Test key</button>
+        <button id="clearKey" type="button" class="ghost">Remove key</button>
+        <span id="keyStatus" class="status" role="status"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Tools</h2>
+      <p class="hint">Turn off anything you don't want offered when you select text.</p>
+      <ul class="checks" id="detectors"></ul>
+
+      <div class="field">
+        <label for="minRewriteChars">Show the rewriter for selections of at least</label>
+        <div class="row">
+          <input id="minRewriteChars" type="number" min="10" max="500" step="5" class="narrow">
+          <span class="hint inline">characters</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Cache</h2>
+      <p class="hint">
+        AI answers are cached by the exact text and action, so re-selecting something costs nothing.
+        Exchange rates are cached for a few hours.
+      </p>
+      <div class="field">
+        <label for="cacheDays">Keep AI answers for</label>
+        <div class="row">
+          <input id="cacheDays" type="number" min="0" max="90" step="1" class="narrow">
+          <span class="hint inline">days (0 disables caching)</span>
+        </div>
+      </div>
+      <div class="row">
+        <button id="clearCache" type="button">Clear cache now</button>
+        <span id="cacheStatus" class="status" role="status"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Sites</h2>
+      <div class="field">
+        <label class="check">
+          <input id="enabled" type="checkbox">
+          <span>Enabled everywhere</span>
+        </label>
+      </div>
+      <div class="field">
+        <label>Turned off on these sites</label>
+        <ul class="sites" id="disabledSites"></ul>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span id="saveStatus" class="status" role="status"></span>
+    </footer>
+  </main>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

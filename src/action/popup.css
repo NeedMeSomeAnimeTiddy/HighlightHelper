@@ -1,0 +1,68 @@
+:root {
+  --bg: #fff;
+  --fg: #16181d;
+  --muted: #6b7280;
+  --border: #e3e5ea;
+  --accent: #2f6fed;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e2027;
+    --fg: #e8eaee;
+    --muted: #9aa1ad;
+    --border: #33363f;
+    --accent: #5b8cf5;
+  }
+}
+
+body {
+  width: 240px;
+  margin: 0;
+  padding: 12px 14px 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.toggle b { font-weight: 600; overflow-wrap: anywhere; }
+.toggle[hidden] { display: none; }
+
+.key {
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.key.bad { color: #c0392b; }
+
+button {
+  width: 100%;
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); color: var(--accent); }

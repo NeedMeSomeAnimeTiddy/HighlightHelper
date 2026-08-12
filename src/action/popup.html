@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Highlight Helper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../../icons/icon48.png" alt="" width="24" height="24">
+    <strong>Highlight Helper</strong>
+  </header>
+
+  <label class="toggle">
+    <input id="enabled" type="checkbox">
+    <span>Enabled</span>
+  </label>
+
+  <label class="toggle" id="siteRow" hidden>
+    <input id="siteEnabled" type="checkbox">
+    <span>On <b id="siteHost"></b></span>
+  </label>
+
+  <p class="key" id="keyState"></p>
+
+  <button id="settings" type="button">Settings…</button>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

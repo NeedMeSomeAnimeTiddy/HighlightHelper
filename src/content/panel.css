@@ -1,0 +1,290 @@
+/*
+ * Styles for the in-page UI. This file is fetched at runtime and adopted into
+ * a shadow root, so nothing here can leak onto the host page and nothing on
+ * the host page can reach in. `:host` resets inherited text properties, which
+ * is the one thing shadow DOM does not isolate on its own.
+ */
+
+:host {
+  all: initial;
+  --hh-bg: #ffffff;
+  --hh-fg: #16181d;
+  --hh-muted: #6b7280;
+  --hh-border: #e3e5ea;
+  --hh-hover: #f4f5f7;
+  --hh-accent: #2f6fed;
+  --hh-accent-fg: #ffffff;
+  --hh-danger: #c0392b;
+  --hh-shadow: 0 6px 28px rgba(16, 20, 32, 0.16), 0 1px 3px rgba(16, 20, 32, 0.1);
+  --hh-radius: 10px;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--hh-fg);
+  text-align: left;
+  direction: ltr;
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    --hh-bg: #1e2027;
+    --hh-fg: #e8eaee;
+    --hh-muted: #9aa1ad;
+    --hh-border: #33363f;
+    --hh-hover: #282b34;
+    --hh-accent: #5b8cf5;
+    --hh-accent-fg: #0f1116;
+    --hh-danger: #ff7a6b;
+    --hh-shadow: 0 6px 28px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* The layer is positioned in document coordinates by main.js. */
+.hh-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2147483647;
+}
+
+/* ---------- the small selection icon ---------- */
+
+.hh-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--hh-border);
+  border-radius: 8px;
+  background: var(--hh-bg);
+  box-shadow: var(--hh-shadow);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 90ms ease-out, transform 90ms ease-out;
+}
+
+.hh-icon.hh-in { opacity: 1; transform: scale(1); }
+.hh-icon:hover { background: var(--hh-hover); }
+.hh-icon svg { width: 16px; height: 16px; display: block; }
+
+/* ---------- the panel ---------- */
+
+.hh-panel {
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  background: var(--hh-bg);
+  border: 1px solid var(--hh-border);
+  border-radius: var(--hh-radius);
+  box-shadow: var(--hh-shadow);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 100ms ease-out, transform 100ms ease-out;
+}
+
+.hh-panel.hh-in { opacity: 1; transform: none; }
+
+.hh-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 5px 5px 0;
+  border-bottom: 1px solid var(--hh-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hh-tabs::-webkit-scrollbar { display: none; }
+
+.hh-tab {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--hh-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 10px 7px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hh-tab:hover { background: var(--hh-hover); color: var(--hh-fg); }
+
+.hh-tab[aria-selected="true"] {
+  color: var(--hh-fg);
+  border-bottom-color: var(--hh-accent);
+}
+
+.hh-body {
+  padding: 11px 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hh-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 7px;
+  border-top: 1px solid var(--hh-border);
+  color: var(--hh-muted);
+  font-size: 11px;
+}
+
+.hh-foot button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--hh-muted);
+  font: inherit;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.hh-foot button:hover { background: var(--hh-hover); color: var(--hh-fg); }
+
+/* ---------- content pieces ---------- */
+
+.hh-conv {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.hh-conv .hh-from { color: var(--hh-muted); font-weight: 500; }
+.hh-conv .hh-arrow { color: var(--hh-muted); font-weight: 400; }
+
+.hh-sub {
+  margin: 5px 0 0;
+  color: var(--hh-muted);
+  font-size: 11.5px;
+}
+
+.hh-extra {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--hh-border);
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--hh-muted);
+}
+
+.hh-extra span { color: var(--hh-fg); }
+
+.hh-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hh-muted);
+  margin-bottom: 4px;
+}
+
+.hh-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  margin-bottom: 9px;
+}
+
+.hh-quote {
+  margin: 0 0 9px;
+  padding-left: 8px;
+  border-left: 2px solid var(--hh-border);
+  color: var(--hh-muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 76px;
+  overflow: hidden;
+}
+
+.hh-note { margin: 0; color: var(--hh-muted); font-size: 12px; }
+.hh-note.hh-warn { color: var(--hh-danger); }
+
+.hh-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+.hh-btn {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--hh-border);
+  border-radius: 6px;
+  background: var(--hh-bg);
+  color: var(--hh-fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hh-btn:hover:not(:disabled) { background: var(--hh-hover); }
+.hh-btn:disabled { opacity: 0.45; cursor: default; }
+
+.hh-btn.hh-primary {
+  background: var(--hh-accent);
+  border-color: var(--hh-accent);
+  color: var(--hh-accent-fg);
+}
+
+.hh-btn.hh-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.hh-btn.hh-ghost { border-color: transparent; color: var(--hh-muted); }
+.hh-btn.hh-ghost:hover:not(:disabled) { color: var(--hh-fg); }
+
+.hh-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--hh-muted);
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.hh-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--hh-border);
+  border-top-color: var(--hh-accent);
+  border-radius: 50%;
+  animation: hh-spin 0.65s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes hh-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hh-icon, .hh-panel { transition: none; }
+  .hh-spinner { animation-duration: 1.6s; }
+}
+
+.hh-error { color: var(--hh-danger); font-size: 12.5px; }
+.hh-error .hh-btn { color: var(--hh-fg); }
+
+.hh-select {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--hh-border);
+  border-radius: 6px;
+  background: var(--hh-bg);
+  color: var(--hh-fg);
+  max-width: 100%;
+}

@@ -1,0 +1,19 @@
+# The DeepSeek API key is stored in chrome.storage.local, never on disk in this
+# repo. These patterns exist so a stray local key file can't be committed.
+.env
+.env.*
+*.key
+*.pem
+secrets.json
+config.local.json
+apikey.txt
+
+# Packaging output
+dist/
+*.zip
+*.crx
+
+# Tooling
+node_modules/
+.DS_Store
+Thumbs.db
