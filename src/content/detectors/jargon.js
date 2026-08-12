@@ -8,7 +8,8 @@
  * Costs a DeepSeek call, so nothing happens until the row is picked.
  */
 
-import { el, asyncView, copyButton, sourceButton, provenanceNote, followUp } from '../kit.js';
+import { el, asyncView, copyButton, sourceButton, provenanceNote, followUp, textBlock }
+  from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { letterRatio } from '../../common/text.js';
 
@@ -66,7 +67,7 @@ export default {
         });
         const actions = el('div', { class: 'hh-row' }, copyButton(res.text, ctx));
         const view = el('div', {},
-          el('div', { class: 'hh-text', text: res.text }),
+          textBlock(res.text),
           actions,
           provenanceNote(res)
         );

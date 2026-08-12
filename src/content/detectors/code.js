@@ -9,8 +9,10 @@
  * more annoying than a wrong hint in a prompt the model can ignore.
  */
 
-import { el, asyncView, streamView, actionRow, copyButton, topicSourceButton, provenanceNote, followUp }
-  from '../kit.js';
+import {
+  el, asyncView, streamView, actionRow, copyButton, topicSourceButton, provenanceNote,
+  followUp, textBlock
+} from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode, guessLanguage } from './codelang.js';
 
@@ -43,7 +45,7 @@ export default {
           (res) => {
             const actions = el('div', { class: 'hh-row' }, copyButton(res.text, api));
             const view = el('div', {},
-              el('div', { class: 'hh-text', text: res.text }),
+              textBlock(res.text),
               actions,
               provenanceNote(res)
             );

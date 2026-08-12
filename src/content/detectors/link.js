@@ -18,6 +18,7 @@
 
 import { el, btn, note, copyButton, replaceContent, spinner } from '../kit.js';
 import { linkToSelection } from '../anchor.js';
+import { collectText, offsetOfRange } from '../locate.js';
 import { looksLikeLanguage } from '../../common/text.js';
 
 const MIN_CHARS = 3;
@@ -64,12 +65,26 @@ function linkView(text, api) {
   const box = el('div', { class: 'hh-detail' });
   replaceContent(box, spinner('Finding this text on the page…'));
 
-  // innerText forces a layout, so it happens once, here, after the click —
-  // never in matches().
+  // Walking the document is expensive, so it happens once, here, after the
+  // click — never in matches().
   setTimeout(() => {
     let url = null;
     try {
-      url = linkToSelection(text);
+      /*
+       * The page's text and the position of the selection within it come from
+       * the same walk, so they share one coordinate system.
+       *
+       * Without the position, the link anchors to the first occurrence of the
+       * text — fine for a unique sentence, and quietly wrong for a repeated
+       * phrase: selecting the fourth "however" produced a link to the first.
+       */
+      const index = collectText(document.body);
+      const selection = window.getSelection();
+      const at = selection?.rangeCount
+        ? offsetOfRange(index, selection.getRangeAt(0))
+        : null;
+
+      url = linkToSelection(text, { pageText: index.text, at });
     } catch (err) {
       console.warn('[Highlight Helper] could not build a text fragment:', err);
     }

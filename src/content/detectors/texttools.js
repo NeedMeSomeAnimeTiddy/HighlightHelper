@@ -115,10 +115,28 @@ export const LINE_OPS = [
  */
 export const EXTRACTORS = [
   { key: 'emails', label: 'Email addresses', re: /[^\s<>()[\]{}",;:]+@[a-z0-9.-]+\.[a-z]{2,}/gi },
-  // The final class refuses to end on punctuation, so "see https://a.com/x, and"
-  // yields the link without the comma that ended the clause. Greedy matching
-  // backtracks one character to satisfy it.
-  { key: 'urls', label: 'Links', re: /\bhttps?:\/\/[^\s<>()[\]{}"']*[^\s<>()[\]{}"'.,;:!?]/gi },
+  /*
+   * Links, in the two forms people actually write them.
+   *
+   * Requiring `https://` was too strict — most links in prose are written
+   * `www.example.com` or as anchor text with no URL in it at all, so a
+   * selection full of links produced no row and looked broken.
+   *
+   * A bare `example.com` is still not matched, and that is deliberate: prose
+   * is full of things shaped like a domain — "e.g.", "vs.", "Node.js",
+   * "main.js" — and a Links row listing "Node.js" is worse than no row.
+   * A scheme or a `www.` is the smallest signal that something was meant as
+   * an address.
+   *
+   * The final class refuses to end on punctuation, so "see www.a.com/x, and"
+   * yields the link without the comma that ended the clause; greedy matching
+   * backtracks one character to satisfy it.
+   */
+  {
+    key: 'urls',
+    label: 'Links',
+    re: /\b(?:https?:\/\/|www\.)[^\s<>()[\]{}"']*[^\s<>()[\]{}"'.,;:!?]/gi
+  },
   // Grouping commas are part of the number; a full stop is only part of it when
   // digits follow, so "costs 12." gives 12 rather than "12.".
   { key: 'numbers', label: 'Numbers', re: /-?\d[\d,]*(?:\.\d+)?/g }

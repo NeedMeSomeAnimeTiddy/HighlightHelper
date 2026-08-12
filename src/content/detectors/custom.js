@@ -11,7 +11,7 @@
  * common/prompts.js for why the selection stays in its own turn.
  */
 
-import { el, streamView, actionRow, provenance, followUp, menu } from '../kit.js';
+import { el, streamView, actionRow, provenance, followUp, menu, textBlock } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { fillTemplate } from '../../common/prompts.js';
 import { looksLikeLanguage } from '../../common/text.js';
@@ -81,7 +81,7 @@ function runView(text, tool, context, api) {
     (res) => {
       const view = el('div', {},
         el('div', { class: 'hh-label', text: `${tool.name}${provenance(res)}` }),
-        el('div', { class: 'hh-text', text: res.text }),
+        textBlock(res.text),
         actionRow(res.text, api)
       );
       followUp({ system: systemPrompt, source: text, answer: res.text }, api, view);

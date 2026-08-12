@@ -331,10 +331,10 @@ function streamFromWorker(message, onChunk) {
       else if (msg?.done) finish(resolve, { ok: true, text: msg.text, cached: msg.cached });
     });
 
-    // Fires when the worker finishes *or* when it dies mid-answer. Only the
-    // second is a failure, and `settled` is what tells them apart.
+    // Only reached when the worker went away without sending a result — it
+    // never closes the port itself, precisely so that this means what it says.
     port.onDisconnect.addListener(() => {
-      finish(reject, new Error('The answer stopped partway through.'));
+      finish(reject, new Error('The answer stopped partway through. Try again.'));
     });
 
     port.postMessage(message);
@@ -1008,7 +1008,11 @@ function onRuntimeMessage(msg, sender, sendResponse) {
    */
   if (settings.detectors.highlight !== false && isEnabledFor(settings, location.hostname)) {
     restoreHighlights()
-      .then(({ found }) => { if (found) watchHighlights(); })
+      // Watch whenever this page has any saved highlights at all, not only when
+      // one was found. A page that is still loading its article can fail every
+      // lookup on the first pass, and only watching on success meant it would
+      // never try again — the highlights stayed invisible until a reload.
+      .then(({ total }) => { if (total) watchHighlights(); })
       .catch((err) => console.warn('[Highlight Helper] could not restore highlights:', err));
   }
 })();

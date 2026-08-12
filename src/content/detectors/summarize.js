@@ -8,7 +8,8 @@
  * Both cost a DeepSeek call, so nothing runs until a row is picked.
  */
 
-import { el, streamView, actionRow, topicSourceButton, provenance, followUp } from '../kit.js';
+import { el, streamView, actionRow, topicSourceButton, provenance, followUp, textBlock }
+  from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode } from './codelang.js';
 
@@ -58,7 +59,7 @@ function run(text, action, busy, label, api) {
       const actions = actionRow(res.text, api);
       const view = el('div', {},
         el('div', { class: 'hh-label', text: `${label}${provenance(res)}` }),
-        el('div', { class: 'hh-text', text: res.text }),
+        textBlock(res.text),
         actions
       );
       // A paragraph has no encyclopedia title. The topics are derived from the

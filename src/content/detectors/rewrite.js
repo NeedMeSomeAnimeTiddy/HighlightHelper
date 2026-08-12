@@ -9,7 +9,7 @@
  * against what it replaced.
  */
 
-import { el, menu, streamView, quote, actionRow, provenance } from '../kit.js';
+import { el, menu, streamView, quote, actionRow, provenance, textBlock } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { wordCount, looksLikeLanguage, plural } from '../../common/text.js';
 import { isCode } from './codelang.js';
@@ -84,7 +84,7 @@ function resultView(text, tone, api) {
           el('div', { class: 'hh-label', text: `Was${provenance(res)}` }),
           quote(text),
           el('div', { class: 'hh-label', text: tone.label }),
-          el('div', { class: 'hh-text', text: res.text }),
+          textBlock(res.text),
           actionRow(res.text, api)
         )),
     (err, retry) => api.errorFor(err, retry)

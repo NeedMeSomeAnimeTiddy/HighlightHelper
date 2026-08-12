@@ -53,17 +53,17 @@ function lower(s) {
 const WORD = /[\p{L}\p{N}_]/u;
 
 /**
- * How many times `needle` appears in `hay` as whole words, counting no further
- * than `limit` — the callers only ever ask "is this unique?", and a common word
- * on a long page would otherwise be counted thousands of times.
+ * Where `needle` appears in `hay` as whole words, stopping after `limit`
+ * hits — the uniqueness callers only ever ask "is there more than one?", and a
+ * common word on a long page would otherwise be located thousands of times.
  */
-export function occurrences(hay, needle, limit = 2) {
-  if (!needle) return 0;
+export function occurrenceIndices(hay, needle, limit = Infinity) {
+  if (!needle) return [];
 
   const startsWord = WORD.test(needle[0]);
   const endsWord = WORD.test(needle[needle.length - 1]);
 
-  let count = 0;
+  const found = [];
   let i = 0;
   while ((i = hay.indexOf(needle, i)) !== -1) {
     const before = i === 0 ? '' : hay[i - 1];
@@ -71,12 +71,16 @@ export function occurrences(hay, needle, limit = 2) {
     const clearStart = !startsWord || !before || !WORD.test(before);
     const clearEnd = !endsWord || !after || !WORD.test(after);
     if (clearStart && clearEnd) {
-      count += 1;
-      if (count >= limit) return count;
+      found.push(i);
+      if (found.length >= limit) return found;
     }
     i += 1;
   }
-  return count;
+  return found;
+}
+
+export function occurrences(hay, needle, limit = 2) {
+  return occurrenceIndices(hay, needle, limit).length;
 }
 
 /**
@@ -136,7 +140,7 @@ const MAX_PART_CHARS = 300;
  * worse outcome than a button that says it could not make one. The caller shows
  * the plain page URL instead.
  */
-export function buildTextFragment(selection, pageText) {
+export function buildTextFragment(selection, pageText, { at = null } = {}) {
   const needle = normalise(selection);
   const hay = normalise(pageText);
   if (!needle || needle.length > MAX_PART_CHARS * 2) return null;
@@ -149,15 +153,32 @@ export function buildTextFragment(selection, pageText) {
   // If alignment broke, emit from the comparison copy so the two agree.
   const src = needleLower && hayLower ? hay : cmpHay;
 
-  const at = cmpHay.indexOf(cmpNeedle);
-  if (at === -1) return null;
+  /*
+   * Which occurrence the user actually selected.
+   *
+   * The first version took `indexOf` — the *first* match — which is right for a
+   * unique sentence and quietly wrong for anything repeated: selecting the
+   * fourth "however" on a page produced a valid, unique link to the first one.
+   * It looked like it worked, which is the failure this file exists to avoid.
+   *
+   * `at` is an offset into the raw `pageText`; whitespace collapsing moves
+   * everything left, so it is re-measured in normalised space by normalising
+   * the text in front of it.
+   */
+  const hits = occurrenceIndices(cmpHay, cmpNeedle);
+  if (!hits.length) return null;
+
+  const target = at == null ? null : normalise(pageText.slice(0, at)).length;
+  const at2 = target == null
+    ? hits[0]
+    : hits.reduce((best, i) => (Math.abs(i - target) < Math.abs(best - target) ? i : best), hits[0]);
 
   // Everything emitted is sliced out of the page, never out of the selection.
   // The two are normally identical — the selection came from the page — but
   // when they differ it is the page's own capitalisation that a reader of the
   // link will see, and the prefix and suffix already come from there, so
   // taking the phrase from anywhere else would be inconsistent for no gain.
-  const srcNeedle = src.slice(at, at + cmpNeedle.length);
+  const srcNeedle = src.slice(at2, at2 + cmpNeedle.length);
   const parts = words(srcNeedle);
 
   // Long selection: quote the ends and let the browser span between them.
@@ -171,17 +192,17 @@ export function buildTextFragment(selection, pageText) {
   if (srcNeedle.length > MAX_PART_CHARS) return null;
 
   // Short and already unique: the simplest directive there is.
-  if (occurrences(cmpHay, cmpNeedle) === 1) return encodePart(srcNeedle);
+  if (hits.length === 1) return encodePart(srcNeedle);
 
   // Otherwise widen the window until only one match survives.
   for (const chars of CONTEXT_STEPS) {
-    const win = contextAt(cmpHay, at, cmpNeedle.length, chars);
+    const win = contextAt(cmpHay, at2, cmpNeedle.length, chars);
     if (!win.prefix && !win.suffix) continue;
 
     // A real contiguous slice, so this tests precisely what gets emitted.
     if (occurrences(cmpHay, cmpHay.slice(win.start, win.end)) !== 1) continue;
 
-    const out = contextAt(src, at, srcNeedle.length, chars);
+    const out = contextAt(src, at2, srcNeedle.length, chars);
     if (out.prefix.length + out.suffix.length > MAX_PART_CHARS) return null;
 
     return [
@@ -201,8 +222,8 @@ export function buildTextFragment(selection, pageText) {
  * existing `#section` is legal, but carrying over whatever hash the page
  * happened to be showing is not what anyone means by "link to this".
  */
-export function linkToSelection(selection, { url = location.href, pageText = null } = {}) {
-  const text = buildTextFragment(selection, pageText ?? document.body.innerText);
+export function linkToSelection(selection, { url = location.href, pageText = null, at = null } = {}) {
+  const text = buildTextFragment(selection, pageText ?? document.body.innerText, { at });
   if (!text) return null;
 
   let base;

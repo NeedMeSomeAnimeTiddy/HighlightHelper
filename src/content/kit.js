@@ -140,6 +140,91 @@ export function errorBox(message, { onRetry, onSettings } = {}) {
   return wrap;
 }
 
+/* ------------------------------------------------------------------ *
+ * Model output
+ * ------------------------------------------------------------------ */
+
+/**
+ * The little markdown a model emits, rendered rather than shown raw.
+ *
+ * Every prompt here asks for a bare answer and most of them say "no markdown",
+ * and models emit `**like this**` anyway — so the panel showed the asterisks.
+ * Instructing harder does not work; rendering does, and bold in a summary is
+ * genuinely useful once it is bold.
+ *
+ * Built from DOM nodes, never `innerHTML`. This is model output being placed
+ * on a page the extension does not own, so it can be text or it can be
+ * elements this file constructed, and nothing in between.
+ *
+ * Deliberately tiny: bold, italic, inline code, bullets, headings. Links are
+ * *not* rendered — a clickable URL that a model invented is exactly the
+ * fabricated citation the whole "Find a source" design exists to avoid.
+ */
+/**
+ * The emphasis markers, with markdown's own rule that the content may not
+ * begin or end with a space — which is what stops "2 * 3 * 4" being read as
+ * italic. The lookarounds on `_` keep snake_case identifiers intact.
+ */
+const RUN = String.raw`\S(?:[^\n]*?\S)?`;
+const INLINE = new RegExp(
+  [
+    String.raw`\*\*(${RUN})\*\*`,
+    String.raw`__(${RUN})__`,
+    String.raw`\*(${RUN})\*`,
+    String.raw`(?<![a-z0-9])_(${RUN})_(?![a-z0-9])`,
+    String.raw`\`([^\`\n]+)\``
+  ].join('|'),
+  'gi'
+);
+
+/**
+ * Splits a model's answer into `{ tag, text }` tokens — `tag` being null for
+ * ordinary text, or 'strong' / 'em' / 'code'.
+ *
+ * Separate from the DOM building so the fiddly half can be tested in Node,
+ * which is where the mistakes are: an italic marker eating a snake_case
+ * identifier, or a multiplication sign being read as emphasis.
+ */
+export function parseMarkup(raw) {
+  const tokens = [];
+  const push = (tag, text) => { if (text) tokens.push({ tag, text }); };
+
+  String(raw ?? '').split('\n').forEach((line, i) => {
+    if (i) push(null, '\n');
+
+    const text = line
+      .replace(/^\s*#{1,6}\s+/, '')          // headings lose their hashes
+      .replace(/^(\s*)[-*+]\s+/, '$1• ');    // list markers become the panel's bullet
+
+    let last = 0;
+    let m;
+    INLINE.lastIndex = 0;
+
+    while ((m = INLINE.exec(text))) {
+      push(null, text.slice(last, m.index));
+      const [, bold1, bold2, it1, it2, code] = m;
+      if (bold1 ?? bold2) push('strong', bold1 ?? bold2);
+      else if (it1 ?? it2) push('em', it1 ?? it2);
+      else push('code', code);
+      last = m.index + m[0].length;
+    }
+
+    push(null, text.slice(last));
+  });
+
+  return tokens;
+}
+
+export function richText(raw) {
+  return parseMarkup(raw).map(({ tag, text }) =>
+    (tag ? el(tag, { text }) : document.createTextNode(text)));
+}
+
+/** The standard block for a model's answer. */
+export function textBlock(text, className = 'hh-text') {
+  return el('div', { class: className }, ...richText(text));
+}
+
 /**
  * The suffix on a result's label: where the answer came from.
  *
@@ -442,7 +527,9 @@ export function followUp({ system, source, answer }, api, host) {
         reply.replaceChildren(document.createTextNode(text));
         api.resize?.();
       });
-      reply.replaceChildren(document.createTextNode(res.text));
+      // Plain text while it streams — partial markdown renders as nonsense —
+      // then the real thing once the answer is whole.
+      reply.replaceChildren(...richText(res.text));
       messages.push({ role: 'assistant', content: res.text });
     } catch (err) {
       reply.replaceChildren(

@@ -107,8 +107,23 @@ export async function restore() {
     else missing += 1;
   }
 
+  /*
+   * Say so when a saved highlight could not be found.
+   *
+   * Without this the two ways this feature fails look identical from the
+   * outside — nothing is coloured — and they need opposite fixes. Silence here
+   * means the text *was* found and the painting is at fault; a warning means
+   * the re-finding is.
+   */
+  if (missing) {
+    console.warn(
+      `[Highlight Helper] ${missing} of ${records.length} saved highlight(s) could not be ` +
+      'found on this page. They are kept in the library rather than guessed at.'
+    );
+  }
+
   repaint();
-  return { found, missing };
+  return { found, missing, total: records.length };
 }
 
 function safeLocate(record) {
@@ -122,7 +137,14 @@ function safeLocate(record) {
 
 /** Adds one that was just made, without re-reading storage. */
 export function add(record, range) {
-  painted.set(record.id, { record, range: range || safeLocate(record) });
+  const found = range || safeLocate(record);
+  if (!found) {
+    console.warn(
+      '[Highlight Helper] saved a highlight but could not find its text on the page ' +
+      'to paint. It is in the library and will be retried on the next visit.'
+    );
+  }
+  painted.set(record.id, { record, range: found });
   repaint();
 }
 

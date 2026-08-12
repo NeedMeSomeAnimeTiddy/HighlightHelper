@@ -27,7 +27,7 @@ import texttools, {
 import dictionary from '../src/content/detectors/dictionary.js';
 import search from '../src/content/detectors/search.js';
 import custom from '../src/content/detectors/custom.js';
-import { buildTextFragment, occurrences, normalise, encodePart }
+import { buildTextFragment, occurrences, occurrenceIndices, normalise, encodePart }
   from '../src/content/anchor.js';
 import { searchUrlFor, resolveEngines } from '../src/common/searchengines.js';
 import { shapeDefinitions, wiktLang } from '../src/background/dictionary.js';
@@ -39,7 +39,7 @@ import { parseTopics } from '../src/common/text.js';
 import { buildPrompt, cleanOutput, fillTemplate } from '../src/common/prompts.js';
 import { runLocal, isSupported as localSupported, bulletsToPanelStyle }
   from '../src/content/local-ai.js';
-import { provenance } from '../src/content/kit.js';
+import { provenance, parseMarkup } from '../src/content/kit.js';
 import { wikiLang, searchUrl, summaryUrl, isUsable, searchLinks, rankByContext }
   from '../src/background/wikipedia.js';
 import summarize from '../src/content/detectors/summarize.js';
@@ -761,6 +761,25 @@ check('the page\'s own capitalisation survives',
 check('hyphens are encoded, not left to restructure the directive',
   encodePart('well-known'), 'well%2Dknown');
 
+// Reported from real use: selecting a repeated phrase produced a valid,
+// unique link to the *first* one. It looked like it worked.
+const REPEATS = 'The cat sat here. Later the cat sat there. Finally the cat sat everywhere.';
+const decoded = (frag) => frag && frag.split(',').map(decodeURIComponent).join('|');
+
+check('with no position, the first occurrence is used',
+  decoded(buildTextFragment('the cat sat', REPEATS)), 'The cat sat|-here. Later');
+check('a position picks the occurrence the user selected',
+  decoded(buildTextFragment('the cat sat', REPEATS, { at: 24 })),
+  'here. Later-|the cat sat|-there.');
+check('and the third, not merely "not the first"',
+  decoded(buildTextFragment('the cat sat', REPEATS, { at: 51 })),
+  '. Finally-|the cat sat|-everywhere.');
+check('a unique phrase is unaffected by a position',
+  buildTextFragment('Finally', REPEATS, { at: 43 }), 'Finally');
+
+check('occurrence positions are word-boundary aware',
+  occurrenceIndices(normalise('a cat in concatenate and a cat').toLowerCase(), 'cat'), [2, 27]);
+
 check('a long selection travels as start,end', (() => {
   const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen';
   const frag = buildTextFragment(long, `Before. ${long}. After.`);
@@ -818,6 +837,31 @@ check('a trailing comma is not part of a URL',
   ex('urls', 'see https://a.com/x, and https://b.io.'), ['https://a.com/x', 'https://b.io']);
 check('a sentence-ending full stop is not part of a number',
   ex('numbers', '12 and -3.5 and 1,200 and costs 12.'), ['12', '-3.5', '1,200']);
+// Reported: no Links row on a page full of links. Requiring "https://" missed
+// the way most links are actually written in prose.
+check('www links are found without a scheme',
+  ex('urls', 'visit www.example.com/page, or www.bbc.co.uk.'),
+  ['www.example.com/page', 'www.bbc.co.uk']);
+// A bare "example.com" stays unmatched on purpose — prose is full of things
+// shaped like a domain, and a Links row listing "Node.js" is worse than none.
+check('filenames and abbreviations are not mistaken for links',
+  ex('urls', 'e.g. Node.js vs. main.js and index.html'), []);
+
+/* ---------- model output ---------- */
+
+const markup = (s) => parseMarkup(s).map((t) => (t.tag ? `${t.tag}{${t.text}}` : t.text)).join('');
+
+// Reported: answers showed **stars** instead of bold. Every prompt asks for no
+// markdown; models emit it anyway, so it is rendered rather than fought.
+check('emphasis and code become elements',
+  markup('A **bold** claim, *italic*, and `code`.'),
+  'A strong{bold} claim, em{italic}, and code{code}.');
+check('list markers become the panel bullet', markup('- first'), '• first');
+check('headings lose their hashes', markup('## Heading'), 'Heading');
+// The two ways this goes wrong on ordinary text.
+check('multiplication is not emphasis', markup('2 * 3 * 4'), '2 * 3 * 4');
+check('snake_case survives', markup('snake_case_name here'), 'snake_case_name here');
+check('an unclosed marker is left alone', markup('a **b'), 'a **b');
 
 /* ---------- HTML entities ---------- */
 
@@ -825,6 +869,14 @@ const entities = (t) => decode.matches(t, S());
 check('named entities decode', entities('caf&amp;eacute; &mdash; fine')?.text, 'caf&eacute; — fine');
 check('decimal and hex entities decode', entities('a &#8212; b &#x2014; c')?.text, 'a — b — c');
 check('an unknown entity is left alone', entities('&notareal; thing'), null);
+// Reported: "caf&eacute;" came back untouched. The table hand-listed thirty
+// "common" entities and had no accented letters at all.
+check('accented letters decode', entities('caf&eacute; and &ccedil;a and &Uuml;ber')?.text,
+  'café and ça and Über');
+// Entity names are case-sensitive: &Uuml; is Ü, &uuml; is ü.
+check('case distinguishes the two halves of a pair',
+  entities('&AElig; &aelig; &Oslash; &oslash;')?.text, 'Æ æ Ø ø');
+check('a malformed all-caps name is still tolerated', entities('a &AMP; b')?.text, 'a & b');
 // Surrogate halves are not characters; writing them out is the honest answer.
 check('a surrogate code point is not decoded', entities('&#xD800; here'), null);
 

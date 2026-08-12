@@ -318,9 +318,21 @@ chrome.runtime.onConnect.addListener((port) => {
       post({ done: true, ...result });
     } catch (err) {
       post({ error: String(err?.message || err) });
-    } finally {
-      if (alive) port.disconnect();
     }
+
+    /*
+     * The port is deliberately *not* closed here.
+     *
+     * Disconnecting immediately after postMessage races the message: Chrome
+     * may drop anything still in flight when a port closes, so the final
+     * `done` sometimes never arrived and the page saw nothing but a
+     * disconnect — which it correctly, and confusingly, reported as "the
+     * answer stopped partway through". Intermittently, and more often on fast
+     * answers, which is the worst kind of bug to chase.
+     *
+     * The content script closes it the moment it has the result. That side
+     * knows it received everything; this one only knows it sent it.
+     */
   });
 });
 

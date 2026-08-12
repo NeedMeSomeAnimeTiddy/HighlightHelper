@@ -109,25 +109,52 @@ function identify(text) {
 }
 
 /**
- * HTML entities — `&amp;`, `&#8212;`, `&#x2014;`.
+ * HTML entities — `&amp;`, `&eacute;`, `&#8212;`, `&#x2014;`.
  *
  * Decoded by table and by code point rather than by assigning to `innerHTML`
  * and reading `textContent` back. That trick is the usual one-liner and it is
- * an HTML parser pointed at untrusted text; the fact that it happens to be
- * inert for entities alone is not a property worth relying on inside a content
- * script that runs on every page.
+ * an HTML parser pointed at untrusted text; that it happens to be inert for
+ * entities alone is not a property worth relying on inside a content script
+ * that runs on every page.
  *
- * Only the named entities that actually appear in copied text are listed. The
- * full set is over two thousand and the rest are numeric in practice.
+ * The table below is the Latin-1 block, U+00A0 to U+00FF, in code order.
+ *
+ * Written as one list rather than ninety-six object entries because that is
+ * exactly what it is — a contiguous run, where the index is the code point.
+ * The first version hand-listed thirty "common" entities and missed every
+ * accented letter, so "caf&eacute;" decoded to "caf&eacute;" — the tool
+ * appeared to work while silently doing half the job.
+ */
+const LATIN1 = (
+  'nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr ' +
+  'deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest ' +
+  'Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml ' +
+  'Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times ' +
+  'Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig ' +
+  'agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml ' +
+  'igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide ' +
+  'oslash ugrave uacute ucirc uuml yacute thorn yuml'
+).split(' ');
+
+/**
+ * Everything outside Latin-1 that turns up in copied prose. The full HTML set
+ * runs to over two thousand names; the rest arrive numerically in practice.
  */
 const NAMED = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
-  mdash: '—', ndash: '–', hellip: '…', lsquo: '‘', rsquo: '’',
-  ldquo: '“', rdquo: '”', copy: '©', reg: '®', trade: '™',
-  deg: '°', pound: '£', euro: '€', yen: '¥', cent: '¢',
-  times: '×', divide: '÷', plusmn: '±', frac12: '½', bull: '•',
-  laquo: '«', raquo: '»', dagger: '†', sect: '§', para: '¶'
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  mdash: '—', ndash: '–', hellip: '…',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
+  sbquo: '‚', bdquo: '„', trade: '™',
+  bull: '•', dagger: '†', Dagger: '‡', permil: '‰',
+  prime: '′', Prime: '″', lsaquo: '‹', rsaquo: '›',
+  oline: '‾', frasl: '⁄', euro: '€',
+  larr: '←', uarr: '↑', rarr: '→', darr: '↓', harr: '↔',
+  minus: '−', ne: '≠', le: '≤', ge: '≥', infin: '∞',
+  ensp: ' ', emsp: ' ', thinsp: ' '
 };
+
+// The index is the code point, so the whole accented-letter family comes free.
+LATIN1.forEach((name, i) => { NAMED[name] = String.fromCharCode(0xa0 + i); });
 
 const RE_ENTITY = /&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]{1,31});/gi;
 
@@ -148,7 +175,10 @@ function decodeEntities(text) {
         ch = String.fromCodePoint(code);
       }
     } else {
-      ch = NAMED[body.toLowerCase()] ?? null;
+      // Entity names are case-sensitive — &Uuml; is Ü and &uuml; is ü — so an
+      // exact hit wins. The lowercase retry is only tolerance for malformed
+      // input like &AMP;, and can never override a real cased pair.
+      ch = NAMED[body] ?? NAMED[body.toLowerCase()] ?? null;
     }
     if (ch == null) return whole;
     changed = true;

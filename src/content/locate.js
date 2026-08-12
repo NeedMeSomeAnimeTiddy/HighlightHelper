@@ -167,6 +167,24 @@ export function locate({ text, prefix = '', suffix = '' }, root = document.body)
   return rangeFor(index, first.index, first.index + first[0].length);
 }
 
+/**
+ * Where a live selection starts, as an offset into `index.text`.
+ *
+ * This is what tells "link to this text" *which* occurrence you meant. Without
+ * it the link anchors to the first match on the page, which is right for a
+ * unique sentence and silently wrong for a repeated phrase.
+ *
+ * Returns null when the range does not begin inside a text node — a selection
+ * that starts on an element boundary. The caller then falls back to the first
+ * occurrence, which is what it did before this existed.
+ */
+export function offsetOfRange(index, range) {
+  const node = range?.startContainer;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  const entry = index.nodes.find((n) => n.node === node);
+  return entry ? entry.start + range.startOffset : null;
+}
+
 /** How much of the surrounding text to remember, in characters. */
 const CONTEXT_CHARS = 40;
 

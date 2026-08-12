@@ -391,6 +391,22 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The small amount of markdown a model emits, once it is rendered. */
+.hh-text strong,
+.hh-turn strong { font-weight: 600; }
+
+.hh-text em,
+.hh-turn em { font-style: italic; }
+
+.hh-text code,
+.hh-turn code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--hh-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
 /*
  * A caret while text is still arriving.
  *
