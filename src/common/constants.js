@@ -10,6 +10,8 @@ export const MSG = {
   CLEAR_CACHE: 'hh:clear-cache',
   CACHE_STATS: 'hh:cache-stats',
   OPEN_OPTIONS: 'hh:open-options',
+  /** Content script asking the worker for panel.css — see main.js loadCss. */
+  STYLESHEET: 'hh:stylesheet',
   /** background -> content script: open the panel, optionally at one tool. */
   RUN_TOOL: 'hh:run-tool'
 };

@@ -556,12 +556,22 @@ check('Continue writing sends a known action',
 const contextIds = [];
 for (const item of CONTEXT_TOOLS) {
   if (item.type === 'separator' || item.id === 'menu') continue;
-  contextIds.push(item.id);
+  // A grouping row is a heading, not a tool — only its children are clickable.
+  if (!item.grouping) contextIds.push(item.id);
   if (Array.isArray(item.children)) for (const c of item.children) contextIds.push(c.id);
 }
 
 // Keys the detectors actually produce, gathered from the modules themselves.
 const topLevelKeys = new Set([
+  ...rows(currency, '$50', S({ targetCurrency: 'EUR' })).map((r) => r.key),
+  ...rows(unit, '5 miles').map((r) => r.key),
+  ...rows(calc, '2 + 2').map((r) => r.key),
+  ...rows(datetime, '1700000000').map((r) => r.key),
+  ...rows(coords, '37.7749, -122.4194').map((r) => r.key),
+  ...rows(color, '#3f8ae0').map((r) => r.key),
+  ...rows(numberbase, '0x1F4').map((r) => r.key),
+  ...rows(regex, '/^\\d{3}$/').map((r) => r.key),
+  ...rows(decode, '{"a":1,"b":[2,3]}').map((r) => r.key),
   ...rows(jargon, 'SLA').map((r) => r.key),
   ...rows(translate, 'Hola amigo mio').map((r) => r.key),
   ...rows(summarize, longText).map((r) => r.key),

@@ -151,6 +151,9 @@ Highlight Helper  ▸
   Key points
   Rewrite  ▸                     Fix grammar / Shorter / Formal / Casual / Continue
   ───────────────
+  Convert & decode  ▸            Calculate / currency / units / date & time /
+                                 coordinates / colour / number base / regex / decode
+  ───────────────
   Explain this code
   Add comments to this code
   Text tools  ▸                  Count / UPPERCASE / … / URL slug
@@ -160,10 +163,10 @@ Highlight Helper  ▸
 Picking one opens the panel straight at that result, drilling through submenus on the way, so
 Back still walks you out through *Rewrite* to the full menu.
 
-**Open Highlight Helper** is the general fallback — it runs normal detection, so it reaches
-the pattern-matched tools (colour, dates, currency, units, coordinates, regex, bases,
-decoding) too. Those don't get their own entries because Chrome builds context menus once
-rather than per-selection, so a *Convert currency* entry would mostly say "not found".
+Every tool is here, including the pattern-matched ones. Chrome builds context menus once
+rather than per-selection, so *Calculate* is present even when you highlighted a sentence —
+but a menu missing the entry you want at the moment you want it is worse than one carrying a
+few that don't apply. **Open Highlight Helper** remains the shortcut that just runs detection.
 
 Three things worth knowing:
 
@@ -242,6 +245,20 @@ test/
 **Why the loader indirection.** Manifest content scripts can't be declared as ES modules, so
 `loader.js` is a one-line classic script that does `import(chrome.runtime.getURL(...))`. That
 keeps the source as small importable modules with no bundler anywhere in the loop.
+
+> **Known risk.** On some sites that import is refused by the *page's* CSP, because a script
+> load started from a content script can be attributed to the page. A site whose `script-src`
+> is a nonce allowlist — `google.com` among them — has no entry for `chrome-extension:`, so
+> nothing loads and the extension looks simply absent: no selection button, and the
+> right-click entries do nothing because there is no listener to receive them. `loader.js`
+> now reports this explicitly in the page console. The fix, if it bites, is to bundle the
+> content modules into one classic script, which means adding a build step.
+
+**Why the stylesheet has a fallback path.** A content script's own `fetch` runs against the
+page's network context, so a site with a restrictive `connect-src` can stop the extension
+reading its own `panel.css` — and the panel would render completely unstyled. The direct
+fetch is the fast path; when it fails, the worker reads the file instead, which no page
+policy can affect.
 
 **Why shadow DOM.** The panel is attached to a shadow root on `<html>` with `all: initial`
 set inline, so page rules like `div { color: red }` can't reach in and the panel's CSS can't

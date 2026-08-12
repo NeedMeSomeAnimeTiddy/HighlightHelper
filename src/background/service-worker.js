@@ -51,7 +51,9 @@ async function buildContextMenus() {
     }
 
     chrome.contextMenus.create({
-      id: PREFIX + item.id,
+      // A grouping row has no tool of its own; prefixing it would make it look
+      // clickable to onClicked, which only acts on ids carrying the prefix.
+      id: (item.grouping ? 'hh-group-' : PREFIX) + item.id,
       parentId: ROOT,
       title: item.title,
       contexts: ['selection']
@@ -70,7 +72,7 @@ async function buildContextMenus() {
       for (const child of item.children) {
         chrome.contextMenus.create({
           id: PREFIX + child.id,
-          parentId: PREFIX + item.id,
+          parentId: (item.grouping ? 'hh-group-' : PREFIX) + item.id,
           title: child.title,
           contexts: ['selection']
         });
@@ -156,6 +158,28 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   });
 });
 
+/**
+ * panel.css, read here rather than in the page.
+ *
+ * A content script's own fetch runs against the page's network context, so a
+ * site with a restrictive `connect-src` can block it from reading its own
+ * extension's files. Fetching in the worker is not subject to any page policy.
+ * Held in memory for the life of the worker.
+ */
+let stylesheetCache = null;
+
+async function readStylesheet() {
+  if (stylesheetCache != null) return stylesheetCache;
+  try {
+    const res = await fetch(chrome.runtime.getURL('src/content/panel.css'));
+    stylesheetCache = await res.text();
+  } catch (err) {
+    console.error('[Highlight Helper] could not read panel.css:', err);
+    stylesheetCache = '';
+  }
+  return stylesheetCache;
+}
+
 /** AI call with cache-around. Returns { text, cached }. */
 async function handleAi({ action, text, options = {} }) {
   const settings = await getSettings();
@@ -214,6 +238,9 @@ async function handle(msg) {
     case MSG.OPEN_OPTIONS:
       chrome.runtime.openOptionsPage();
       return { ok: true };
+
+    case MSG.STYLESHEET:
+      return { ok: true, css: await readStylesheet() };
 
     default:
       return { ok: false, error: `Unknown message: ${msg?.type}` };

@@ -49,10 +49,34 @@ let heightTimer = 0;
 let sizeObserver = null;
 let activeRow = -1;
 
-// Start fetching the stylesheet immediately; it's needed before the first paint.
-const cssPromise = fetch(chrome.runtime.getURL('src/content/panel.css'))
-  .then((r) => r.text())
-  .catch(() => '');
+/**
+ * Loads panel.css.
+ *
+ * The direct fetch is the fast path, but a content script's fetch runs against
+ * the page's network context — a site with a restrictive `connect-src` can stop
+ * us reading our own extension's files, and the panel would render unstyled.
+ * The worker has no such restriction, so it is the fallback.
+ */
+async function loadCss() {
+  try {
+    const res = await fetch(chrome.runtime.getURL('src/content/panel.css'));
+    if (res.ok) {
+      const text = await res.text();
+      if (text) return text;
+    }
+  } catch {
+    /* blocked by the page's policy — ask the worker instead */
+  }
+  try {
+    const res = await send({ type: MSG.STYLESHEET });
+    return res?.ok ? res.css : '';
+  } catch {
+    return '';
+  }
+}
+
+// Started immediately; it's needed before the first paint.
+const cssPromise = loadCss();
 
 /* ------------------------------------------------------------------ *
  * Shadow-DOM host

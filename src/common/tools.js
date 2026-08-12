@@ -7,10 +7,11 @@
  * them drifting apart — this file deliberately does not import the detectors,
  * so the service worker stays free of content-script code.
  *
- * Only tools that work on *any* text get their own entry. The pattern-matched
- * ones (colour, dates, currency, units, coordinates, regex, bases, decoding)
- * are reached through "Open Highlight Helper", which runs detection properly
- * and would otherwise fill the menu with entries that usually say "not found".
+ * Every tool is here, including the pattern-matched ones. Chrome builds these
+ * once rather than per-selection, so a "Calculate" entry is present even when
+ * you highlighted a sentence — but a menu that is missing the entry you want at
+ * the moment you want it is worse than one carrying a few that don't apply, and
+ * the panel explains when one doesn't.
  */
 
 export const CONTEXT_TOOLS = [
@@ -33,6 +34,27 @@ export const CONTEXT_TOOLS = [
       { id: 'rewrite:formal', title: 'More formal' },
       { id: 'rewrite:casual', title: 'More casual' },
       { id: 'rewrite:continue', title: 'Continue writing' }
+    ]
+  },
+
+  { type: 'separator' },
+
+  {
+    id: 'convert',
+    title: 'Convert & decode',
+    // A grouping row, not a tool: `convert` is never a menu-row key, so the
+    // panel never receives it — only its children are clickable.
+    grouping: true,
+    children: [
+      { id: 'calc', title: 'Calculate' },
+      { id: 'currency', title: 'Convert currency' },
+      { id: 'unit', title: 'Convert units' },
+      { id: 'datetime', title: 'Date & time' },
+      { id: 'coords', title: 'Coordinates' },
+      { id: 'color', title: 'Colour' },
+      { id: 'numberbase', title: 'Number base' },
+      { id: 'regex', title: 'Explain this regex' },
+      { id: 'decode', title: 'Decode (JWT, base64, JSON)' }
     ]
   },
 
@@ -66,6 +88,15 @@ export const CONTEXT_TOOLS = [
  * so the answer is a reason rather than a silently missing row.
  */
 export const TOOL_HINTS = {
+  calc: "That doesn't parse as an arithmetic expression. Try \"12 * 8 + 3\" or \"15% of 240\".",
+  currency: 'No currency amount found — an amount needs a symbol or a code, like "$50" or "30 EUR".',
+  unit: 'No measurement found in that selection.',
+  datetime: 'Dates are read as Unix timestamps or ISO 8601, like 1700000000 or 2024-03-15.',
+  coords: 'No coordinates found — try "37.7749, -122.4194" or a degrees/minutes/seconds pair.',
+  color: 'No colour found — #hex, rgb() and hsl() are recognised; colour names are not.',
+  numberbase: 'No number to convert — try 0x1F4, 0b1011, or a whole number over 255.',
+  regex: 'That doesn\'t look like a regular expression. Wrapping it in /…/ makes it unambiguous.',
+  decode: 'Nothing to decode — this reads JWTs, base64, percent-encoding and JSON.',
   explain: 'Explain works on a term or short phrase — up to four words.',
   translate: 'Translation needs some actual text.',
   summarize: 'Summarising needs a paragraph or more.',
