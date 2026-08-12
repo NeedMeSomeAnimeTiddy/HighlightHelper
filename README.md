@@ -61,8 +61,9 @@ There is no build step and no dependencies. Load the folder straight into Chrome
 3. Click **Load unpacked**
 4. Select this folder (the one containing `manifest.json`)
 
-Requires Chrome 111 or newer. Edge works and is verified. **Opera GX does not** — it blocks
-extension scripting at the browser level; see [Blocked by browser policy](#blocked-by-browser-policy).
+Requires Chrome 111 or newer. Edge is verified working. Opera and Opera GX need one extra
+tick — **Allow access to search page results** — before the extension works on search pages;
+see [Opera and Opera GX](#opera-and-opera-gx-search-results-pages).
 
 **After pulling changes, press the ↻ reload button** on the Highlight Helper card at
 `chrome://extensions`. Chrome does not pick up edits to an unpacked extension on its own, and
@@ -134,13 +135,22 @@ That list can come from an enterprise or school policy, but Chromium-based brows
 aren't Chrome also ship **their own built-in lists**, so this appears on ordinary personal
 machines with no policies configured at all.
 
-**Opera GX is a confirmed case.** On a machine with no browser policy keys in the registry at
-all, Opera GX still refused to script the page; the error string comes from its own
-`opera_browser.dll`. Opera doesn't expose Chromium's `chrome://policy` page, so there is
-nothing to inspect and nothing to switch off. **The same unpacked build works in Edge**,
-which is the quickest way to tell a browser restriction apart from a bug in the extension.
+### Opera and Opera GX: search-results pages
 
-If the site you want is on the list, the only real fix is a browser that doesn't block it.
+Opera withholds **search engine results pages** from every extension by default — Google,
+Bing and the other built-in engines — as a privacy measure. It is not specific to this
+extension, and it is why the selection button appears on ordinary pages but not on a Google
+search. There is a per-extension switch:
+
+1. Open `opera://extensions`
+2. Find **Highlight Helper**
+3. Tick **Allow access to search page results**
+
+The toolbar popup detects Opera and says this directly when it hits the block. Note Opera
+does not expose Chromium's `chrome://policy` page, so there is nothing to inspect there.
+
+If a site is blocked for some other reason, a browser that doesn't block it is the only fix.
+Edge is verified working.
 
 One console note: service worker errors do **not** appear in the page console. They're at
 `chrome://extensions` → Highlight Helper → **service worker**. If the right-click menu does

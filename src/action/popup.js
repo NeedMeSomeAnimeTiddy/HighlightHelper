@@ -3,6 +3,9 @@ import { MSG } from '../common/constants.js';
 
 const $ = (id) => document.getElementById(id);
 
+/** Opera and Opera GX both carry OPR/ in the UA and share the same restriction. */
+const IS_OPERA = /\bOPR\//.test(navigator.userAgent);
+
 /** The active tab. Reading `url` is allowed because opening the popup grants activeTab. */
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -81,11 +84,14 @@ function renderStatus(result, tab) {
 
   if (result.state === 'blocked') {
     dot.classList.add('bad');
-    text.textContent = 'Blocked by browser policy';
-    detail.textContent =
-      'Your browser forbids extensions from running on this site, so no extension can ' +
-      'work here. Open <browser>://policy and look at ExtensionSettings → ' +
-      'runtime_blocked_hosts to see the list.';
+    text.textContent = 'Blocked by the browser';
+    detail.textContent = IS_OPERA
+      // Opera withholds search-results pages from every extension by default,
+      // and the switch is per-extension rather than global.
+      ? 'Opera blocks extensions on search results by default. Open opera://extensions, ' +
+        'find Highlight Helper, and tick "Allow access to search page results".'
+      : 'Your browser forbids extensions from running on this site. Check ' +
+        'ExtensionSettings → runtime_blocked_hosts at <browser>://policy.';
     return;
   }
 
