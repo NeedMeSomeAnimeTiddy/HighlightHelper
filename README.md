@@ -509,6 +509,7 @@ test/
   detectors.test.js           node test/detectors.test.js
   qr-roundtrip.js             independent QR reader, used by the tests
   locate-browser.html         the DOM half of highlights; needs a browser
+  MANUAL.md                   the checklist for everything neither suite can reach
 tools/
   static-server.js            serves the repo so that page can import modules
 ```
@@ -795,6 +796,10 @@ can't reach: text spanning inline elements, a phrase that appears twice being re
 highlight surviving a paragraph appearing above it, and the fact that painting inserts no
 elements. This is the same role `qr-roundtrip.js` plays for the QR encoder — the check that
 closes the gap between "self-consistent" and "actually works".
+
+What neither suite can reach is the network, the model, storage that survives a reload, and
+every piece of UI. [`test/MANUAL.md`](test/MANUAL.md) is the checklist for those — eight
+rounds, ordered cheapest-signal-first, with what each failure would mean.
 
 Node has none of the built-in AI globals, which makes it exactly the unsupported-browser case
 — so the provider tests assert the contract that matters there: `runLocal` *declines* rather
