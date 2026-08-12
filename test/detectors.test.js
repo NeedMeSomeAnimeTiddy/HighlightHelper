@@ -31,7 +31,7 @@ import { buildTextFragment, occurrences, occurrenceIndices, normalise, encodePar
   from '../src/content/anchor.js';
 import { searchUrlFor, resolveEngines } from '../src/common/searchengines.js';
 import { shapeDefinitions, wiktLang } from '../src/background/dictionary.js';
-import { flexiblePattern } from '../src/content/locate.js';
+import { strip } from '../src/content/locate.js';
 import { pageKey, hostKey, toMarkdown } from '../src/common/highlights-store.js';
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import { AI, ERR } from '../src/common/constants.js';
@@ -768,14 +768,14 @@ const decoded = (frag) => frag && frag.split(',').map(decodeURIComponent).join('
 
 check('with no position, the first occurrence is used',
   decoded(buildTextFragment('the cat sat', REPEATS)), 'The cat sat|-here. Later');
-check('a position picks the occurrence the user selected',
-  decoded(buildTextFragment('the cat sat', REPEATS, { at: 24 })),
+check('an ordinal picks the occurrence the user selected',
+  decoded(buildTextFragment('the cat sat', REPEATS, { ordinal: 1 })),
   'here. Later-|the cat sat|-there.');
 check('and the third, not merely "not the first"',
-  decoded(buildTextFragment('the cat sat', REPEATS, { at: 51 })),
+  decoded(buildTextFragment('the cat sat', REPEATS, { ordinal: 2 })),
   '. Finally-|the cat sat|-everywhere.');
-check('a unique phrase is unaffected by a position',
-  buildTextFragment('Finally', REPEATS, { at: 43 }), 'Finally');
+check('a unique phrase is unaffected by an ordinal',
+  buildTextFragment('Finally', REPEATS, { ordinal: 0 }), 'Finally');
 
 check('occurrence positions are word-boundary aware',
   occurrenceIndices(normalise('a cat in concatenate and a cat').toLowerCase(), 'cat'), [2, 27]);
@@ -882,16 +882,15 @@ check('a surrogate code point is not decoded', entities('&#xD800; here'), null);
 
 /* ---------- highlights ---------- */
 
-// Whitespace in the needle has to match whatever the page does with it: HTML
-// collapses runs, and a source line break renders as a space.
-check('whitespace in a pattern matches any run',
-  flexiblePattern('the  quick\n brown'), 'the\\s+quick\\s+brown');
-check('regex metacharacters are escaped, not interpreted',
-  flexiblePattern('cost (USD) $5.00 [net]'), 'cost\\s+\\(USD\\)\\s+\\$5\\.00\\s+\\[net\\]');
-check('nothing to match on yields no pattern', flexiblePattern('   '), null);
-// The DOM half of this — real Ranges, real text nodes, and the fact that a
-// full stop sits between a highlight and the words after it — is checked in
-// test/locate-browser.html, which Node cannot run.
+// Locating removes whitespace from both sides rather than trying to match it.
+// The pattern-based version this replaced failed on any page with inline markup
+// inside a sentence: a footnote marker renders as "codes[1]" while the index
+// held "codes\n[1]", and the needle had no whitespace there to match against.
+check('whitespace is removed, not matched', strip('the  quick\n brown'), 'thequickbrown');
+check('a non-breaking space goes too', strip('a b'), 'ab');
+check('nothing left is empty', strip('   '), '');
+// The DOM half — real Ranges, real text nodes, markup inside a sentence — is
+// checked in test/locate-browser.html, which Node cannot run.
 
 // The hash is never part of a page's identity; the query string usually is.
 check('the fragment is not part of a page key',

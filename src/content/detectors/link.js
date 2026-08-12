@@ -18,7 +18,7 @@
 
 import { el, btn, note, copyButton, replaceContent, spinner } from '../kit.js';
 import { linkToSelection } from '../anchor.js';
-import { collectText, offsetOfRange } from '../locate.js';
+import { ordinalOfSelection } from '../locate.js';
 import { looksLikeLanguage } from '../../common/text.js';
 
 const MIN_CHARS = 3;
@@ -71,20 +71,22 @@ function linkView(text, api) {
     let url = null;
     try {
       /*
-       * The page's text and the position of the selection within it come from
-       * the same walk, so they share one coordinate system.
+       * Which occurrence of the text was selected.
        *
-       * Without the position, the link anchors to the first occurrence of the
-       * text — fine for a unique sentence, and quietly wrong for a repeated
-       * phrase: selecting the fourth "however" produced a link to the first.
+       * Without it the link anchors to the first one on the page — fine for a
+       * unique sentence, and quietly wrong for a repeated phrase: selecting the
+       * fourth "however" produced a valid link to the first.
+       *
+       * An ordinal rather than a position, because the two files measure text
+       * differently — anchor.js collapses whitespace, locate.js removes it —
+       * and "which one" survives that where "how far in" would not.
        */
-      const index = collectText(document.body);
       const selection = window.getSelection();
-      const at = selection?.rangeCount
-        ? offsetOfRange(index, selection.getRangeAt(0))
-        : null;
+      const ordinal = selection?.rangeCount
+        ? ordinalOfSelection(text, selection.getRangeAt(0))
+        : 0;
 
-      url = linkToSelection(text, { pageText: index.text, at });
+      url = linkToSelection(text, { ordinal });
     } catch (err) {
       console.warn('[Highlight Helper] could not build a text fragment:', err);
     }

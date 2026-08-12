@@ -221,8 +221,16 @@ assertions over things Node cannot reach — text spanning inline elements, ambi
 refused, a highlight surviving a paragraph appearing above it, and painting inserting no
 elements. Same role `qr-roundtrip.js` plays for the encoder.
 
-**Still unverified:** the full loop through `chrome.storage` — saving on one visit and
-repainting on the next — and the library and export UI. Those need the extension loaded.
+**What the first real browser pass found.** Highlights saved correctly and never painted.
+The cause was the newline separator between text nodes: it exists to stop "Cat" + "astrophe"
+matching "Catastrophe", and it also stops "codes" + "[1]" matching the "codes[1]" a page
+renders — so a single footnote marker inside a selected sentence broke the lookup, on most of
+the pages anyone would want to highlight. Matching now removes whitespace from both sides
+instead, which fixes that and the opposite case together. Verified against the real Wikipedia
+article that reproduced it.
+
+The fixture that passed twenty assertions was too clean to catch this. It now contains a
+sentence with a `<sup>` in the middle of it.
 
 The feature the extension is named after. Save a selection, restore it on the next visit,
 attach a note and a colour, browse the lot, export to Markdown.

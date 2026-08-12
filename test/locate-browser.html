@@ -27,6 +27,7 @@
     <p>The cat sat on the mat. Later the dog sat on the mat too.</p>
     <p>Nothing else happened that day, and the <em>cat</em> was <strong>quite</strong> content.</p>
     <p>The cat sat on the mat.</p>
+    <p id="inline">Reed&ndash;Solomon codes<sup>[1]</sup> are a group of error-correcting codes.</p>
     <script>/* a script node, which must never be searched */ var ignored = 'cat sat';</script>
   </article>
 
@@ -35,7 +36,7 @@
   <p id="summary"></p>
 
   <script type="module">
-    import { locate, contextFor, collectText, flexiblePattern } from '../src/content/locate.js';
+    import { locate, contextFor, buildIndex, strip, ordinalOfSelection } from '../src/content/locate.js';
 
     const results = document.getElementById('results');
     let passed = 0;
@@ -55,14 +56,27 @@
 
     const root = document.getElementById('fixture');
 
-    /* --- collectText --- */
+    /* --- buildIndex --- */
 
-    const index = collectText(root);
-    check('script contents are not collected', index.text.includes('var ignored'), false);
-    check('paragraph text is collected', index.text.includes('Nothing else happened'), true);
-    // Without a separator, "content." + the next node would concatenate into a
-    // word that is not on the page.
-    check('nodes are separated', /mat\.\s/.test(index.text), true);
+    const index = buildIndex(root);
+    check('script contents are not collected', index.stripped.includes('varignored'), false);
+    check('paragraph text is collected', index.stripped.includes('Nothingelsehappened'), true);
+    check('the index holds no whitespace at all', /\s/.test(index.stripped), false);
+    check('strip removes every kind of space', strip('a  b\n\tc'), 'abc');
+
+    /* --- the failure this replaced --- */
+
+    // Found on a real Wikipedia page: a footnote marker inside a sentence
+    // renders as "codes[1] are" with no gap, while the newline-separated index
+    // this replaced held "codes\n[1]". The needle has no whitespace there, so
+    // the pattern-based search could never match it — one <sup> was enough to
+    // lose a highlight, on most of the pages anyone would want to highlight.
+    const sentence = document.getElementById('inline').innerText.trim();
+    check('a sentence containing inline markup is found',
+      locate({ text: sentence }, root)?.toString().replace(/\s+/g, ' '),
+      sentence.replace(/\s+/g, ' '));
+    check('a phrase spanning the markup boundary is found',
+      Boolean(locate({ text: 'codes[1] are a group' }, root)), true);
 
     /* --- locate: unambiguous --- */
 
@@ -126,14 +140,14 @@
 
     // And when the text really is gone, it says so rather than picking the
     // nearest thing that scored well.
-    const removed = root.lastElementChild;
-    const kept = removed.textContent;
-    removed.remove();
+    const doomed = document.createElement('p');
+    doomed.textContent = 'A sentence that is about to be deleted entirely.';
+    root.append(doomed);
+    check('a real paragraph is found while it exists',
+      Boolean(locate({ text: 'about to be deleted entirely' }, root)), true);
+    doomed.remove();
     check('text that has actually gone is reported missing, not guessed at',
-      locate({ text: 'a phrase only in the removed node' }, root), null);
-    const restored = document.createElement('p');
-    restored.textContent = kept;
-    root.append(restored);
+      locate({ text: 'about to be deleted entirely' }, root), null);
 
     /* --- painting --- */
 

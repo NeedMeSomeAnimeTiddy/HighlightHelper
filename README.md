@@ -362,7 +362,17 @@ One stylesheet is added to the page, which is unavoidable — `::highlight()` ru
 live in the document whose ranges they colour, so they cannot go in the panel's shadow root.
 
 **Finding a highlight again.** The text is stored with the words that surrounded it, and
-`content/locate.js` searches for that combination. It survives the page gaining a paragraph
+`content/locate.js` searches for that combination — **ignoring whitespace entirely on both
+sides**. That is not a refinement, it is the difference between working and not. The first
+version concatenated text nodes with a newline between them and searched with a pattern whose
+words were joined by `s+`; it passed a clean fixture and failed on essentially every real
+page, because a footnote marker inside a sentence renders as `codes[1]` with no gap while the
+index held `codes
+[1]`. One `<sup>` was enough to lose a highlight. Dropping the separator
+breaks the opposite case, where two block elements render with a gap the source does not
+contain — so neither side keeps its whitespace at all. Every non-space character goes into one
+string, each remembering the text node it came from, and the search is a plain `indexOf`.
+Source formatting, block boundaries, inline markup and `&nbsp;` stop mattering at once. It survives the page gaining a paragraph
 above it, which is the ordinary case. When the text is genuinely gone — or when it now
 appears several times and the context no longer picks one out — the highlight stays in the
 library marked as not found. It is never quietly reattached to whichever paragraph scored

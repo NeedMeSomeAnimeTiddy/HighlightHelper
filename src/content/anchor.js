@@ -140,7 +140,7 @@ const MAX_PART_CHARS = 300;
  * worse outcome than a button that says it could not make one. The caller shows
  * the plain page URL instead.
  */
-export function buildTextFragment(selection, pageText, { at = null } = {}) {
+export function buildTextFragment(selection, pageText, { ordinal = 0 } = {}) {
   const needle = normalise(selection);
   const hay = normalise(pageText);
   if (!needle || needle.length > MAX_PART_CHARS * 2) return null;
@@ -161,17 +161,14 @@ export function buildTextFragment(selection, pageText, { at = null } = {}) {
    * fourth "however" on a page produced a valid, unique link to the first one.
    * It looked like it worked, which is the failure this file exists to avoid.
    *
-   * `at` is an offset into the raw `pageText`; whitespace collapsing moves
-   * everything left, so it is re-measured in normalised space by normalising
-   * the text in front of it.
+   * `ordinal` counts which one, not where it is. A character offset would have
+   * to be translated between this file's whitespace-collapsed view and the
+   * caller's, and the two would drift; an ordinal means the same thing in both.
    */
   const hits = occurrenceIndices(cmpHay, cmpNeedle);
   if (!hits.length) return null;
 
-  const target = at == null ? null : normalise(pageText.slice(0, at)).length;
-  const at2 = target == null
-    ? hits[0]
-    : hits.reduce((best, i) => (Math.abs(i - target) < Math.abs(best - target) ? i : best), hits[0]);
+  const at2 = hits[Math.min(Math.max(0, ordinal), hits.length - 1)];
 
   // Everything emitted is sliced out of the page, never out of the selection.
   // The two are normally identical — the selection came from the page — but
@@ -222,8 +219,10 @@ export function buildTextFragment(selection, pageText, { at = null } = {}) {
  * existing `#section` is legal, but carrying over whatever hash the page
  * happened to be showing is not what anyone means by "link to this".
  */
-export function linkToSelection(selection, { url = location.href, pageText = null, at = null } = {}) {
-  const text = buildTextFragment(selection, pageText ?? document.body.innerText, { at });
+export function linkToSelection(selection, { url = location.href, pageText = null, ordinal = 0 } = {}) {
+  // innerText, not a walk of the text nodes: the browser matches a fragment
+  // against what it renders, so uniqueness has to be judged on the same thing.
+  const text = buildTextFragment(selection, pageText ?? document.body.innerText, { ordinal });
   if (!text) return null;
 
   let base;
