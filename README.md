@@ -20,11 +20,21 @@ selection actually is:
 
 | Selection | Menu offers | Costs an API call? |
 | --- | --- | --- |
+| `#3f8ae0`, `rgb(63,138,224)`, `hsl(212,72%,56%)` | Swatch, the other two notations, and contrast on white/black | No — local |
+| `1700000000`, `2024-03-15T10:30:00Z` | Your local time in the row. Open it for UTC, ISO, relative ("3 years ago") and both epoch forms | No — local |
 | `$50`, `30 EUR`, `£1.2bn` | The converted amount, right there in the row. Open it for the rate, its age, and other currencies | No — free rate API, cached |
-| `65 mph`, `180 lbs`, `72°F`, `5'11"` | The converted measurement in the row. Open it for extras like ft+in or Kelvin | No — all local |
+| `12 * 8 + 3`, `15% of 240`, `200 + 15%` | The answer. Parsed by hand, never `eval` | No — local |
+| `0x1F4`, `0b1011`, `0o755`, `65536` | Decimal, hex, binary, octal, and a byte-size reading | No — local |
+| `65 mph`, `180 lbs`, `72°F`, `5'11"` | The converted measurement in the row. Open it for extras like ft+in or Kelvin | No — local |
+| A JWT, base64, `%20` escapes, JSON | Decoded or pretty-printed. JWT claims are listed, with `exp`/`iat` as real dates and an expiry warning | No — local |
 | `SLA`, `CI/CD`, `technical debt` | *Explain this* → one plain-English sentence | Yes, when you pick the row |
 | Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
+| A paragraph or more | *Summarise* and *Key points* | Yes, when you pick the row |
 | A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual, each with **Copy** and **Replace** | Yes, when you pick a tone |
+| Any text | *Text tools* → word/character counts, reading time, and UPPER / lower / Title / Sentence / camel / Pascal / snake / kebab / slug | No — local |
+
+Nine of the twelve tools never touch the network. Each can be switched off
+individually in settings.
 
 Free tools resolve up front, so the menu often answers before you click anything. Anything
 that costs money waits for you to pick its row — that click is the consent.
@@ -131,6 +141,7 @@ src/
     currencies.js             ISO codes, symbol table, display symbols
     languages.js              language list + context-menu subset
     numbers.js                grouping-aware number parse/format
+    text.js                   "is this actually prose?" helpers
     hash.js                   FNV-1a + cache key builder
   background/
     service-worker.js         message router, context menu
@@ -145,7 +156,9 @@ src/
     panel.css                 adopted into the shadow root
     detectors/
       index.js                registry + detect()
-      currency.js  unit.js  translate.js  jargon.js  rewrite.js
+      color.js  datetime.js  currency.js  calc.js  numberbase.js
+      unit.js  decode.js  translate.js  jargon.js  summarize.js
+      rewrite.js  texttools.js
       langdetect.js           small script/stopword language guesser
   options/                    options page
   action/                     toolbar popup
@@ -173,6 +186,18 @@ explicit height that failed to update would clip them. The height is pinned only
 under `prefers-reduced-motion`. The `ResizeObserver` is purely positional, so the panel can
 flip above the selection if a result grows past the bottom of the viewport; if it never
 fires, nothing is clipped.
+
+**Why entrance transitions don't use `requestAnimationFrame`.** Same principle. The resting
+class list is the *visible* one; `playEnter()` adds the hidden state, forces a reflow to
+commit it, and removes it again synchronously, which transitions to the resting state. An
+earlier version added the visible class in a rAF callback, which meant the entire panel
+rendered at `opacity: 0` until a frame arrived. Revealing the UI must be what happens when
+nothing runs, not something that has to run.
+
+**Why detectors have a "is this prose?" gate.** `translate`, `rewrite` and `texttools` match
+on shape rather than on a pattern, so without `common/text.js` they cheerfully offer to
+translate a hex colour and rewrite a JWT. A selection like `#3f8ae0` already has a detector
+that owns it; a second, useless row is pure noise.
 
 **Where the network lives.** Only the service worker. Content scripts send messages; they
 never hold the API key and never call `fetch` against DeepSeek.
@@ -253,13 +278,31 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-74 assertions over number parsing, currency matching, unit conversion, acronym detection,
-language guessing, menu row construction, and ordering. No framework, no dependencies.
-`package.json` exists only so Node treats the source as ES modules — Chrome never reads it.
+148 assertions over number parsing, every detector's `matches()`, menu row construction, and
+ordering — including a block that pins down what the catch-all detectors must *not* claim.
+No framework, no dependencies. `package.json` exists only so Node treats the source as ES
+modules — Chrome never reads it.
 
 The tests cover `matches()` and `items()`, which is where the fiddly logic lives; `open()` is
 lazy, so rows can be inspected without a DOM. The rendering and selection machinery is not
 covered — load the extension and try it.
+
+## Ideas not built
+
+Sketched and deliberately left out, roughly in order of how useful they'd be:
+
+| Idea | Note |
+| --- | --- |
+| **Coordinates** — `37.7749, -122.4194` → DMS, and a map link | Opening a map is an outward action; needs a decision on which service |
+| **Regex explainer** — `/^\d{3}-\d{4}$/` in English | Real niche value; could be local for simple patterns, AI for the rest |
+| **Code explainer** — detect a code-shaped selection, explain or comment it | Needs a language guesser to be worth anything |
+| **Continue writing / expand** — the inverse of *Shorter* | One more tone row; trivial to add |
+| **Extract to table** — turn pasted rows into a Markdown table | AI; good for pasted spreadsheet output |
+| **QR code** — for sending a URL to your phone | Needs a QR encoder written from scratch, since no dependencies |
+| **Hash** — SHA-256 of the selection via SubtleCrypto | Easy, but narrow |
+| **Time zone converter** — "3pm EST" in your zone | Parsing zone abbreviations is genuinely ambiguous (CST is three zones) |
+| **HTML entity decode** — `&amp;#8212;` | Fits `decode.js` as another branch |
+| **Roman numerals**, **IBAN/phone formatting** | Cute, rarely wanted |
 
 ## Known limitations
 
@@ -270,6 +313,14 @@ covered — load the extension and try it.
   extension doesn't have. Prefixed forms (`CA$`, `A$`, `US$`) are handled.
 - **Ambiguous unit abbreviations** (`in`, `m`, `t`, `st`, `pt`, `l`) only match at the end of a
   clause or before a size word like *tall* or *wide*, so "5 in the morning" isn't 12.7 cm.
+- **Base64 detection is conservative.** A candidate is only accepted if it decodes to mostly
+  printable text, and an unpadded all-letters string is skipped entirely — plenty of ordinary
+  words are technically valid base64. Padded and mixed-case payloads are fine.
+- **Named CSS colours are not matched.** "orange", "tomato" and "plum" are ordinary words far
+  more often than they are colours.
+- **Dates are only parsed as epoch values or ISO 8601.** `Date.parse` on arbitrary prose is
+  lenient and inconsistent between engines, so "next friday" or a bare "12/03" would produce a
+  confident, wrong answer rather than no answer.
 - **Replace can't reach every editor.** It uses the native value setter for inputs/textareas
   (so React-style controlled components see the change) and `execCommand('insertText')` for
   contenteditable. Editors with their own document model — Google Docs, some CodeMirror

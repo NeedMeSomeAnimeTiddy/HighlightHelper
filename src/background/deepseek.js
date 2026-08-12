@@ -90,6 +90,29 @@ function buildPrompt(action, text, options = {}) {
         temperature: 0.6
       };
 
+    case AI.SUMMARIZE:
+      return {
+        system:
+          "Summarise the user's text in two or three sentences, in the same language as " +
+          'the original. Keep every load-bearing fact, number and name. Do not add opinions, ' +
+          'caveats or anything not present in the text. Reply with the summary only.',
+        user: text,
+        maxTokens: 400,
+        temperature: 0.3
+      };
+
+    case AI.KEYPOINTS:
+      return {
+        system:
+          "Pull the key points out of the user's text as a short bulleted list, in the same " +
+          'language as the original. Use "• " to start each line, one point per line, at most ' +
+          'six points, no sub-bullets and no heading. Each point is one clause, not a ' +
+          'paragraph. Do not add anything not present in the text. Reply with the list only.',
+        user: text,
+        maxTokens: 500,
+        temperature: 0.3
+      };
+
     default:
       throw new Error(`Unknown AI action: ${action}`);
   }

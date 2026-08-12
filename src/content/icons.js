@@ -47,6 +47,33 @@ const PATHS = {
   // speech bubble — casual
   casual: ['M13.4 9.6a1.5 1.5 0 0 1-1.5 1.5H6.1l-3.5 2.6V4a1.5 1.5 0 0 1 1.5-1.5h7.8A1.5 1.5 0 0 1 13.4 4z'],
 
+  // clock — dates and timestamps
+  clock: [
+    'M8 1.6a6.4 6.4 0 1 0 0 12.8A6.4 6.4 0 0 0 8 1.6z',
+    'M8 4.3V8.2l2.7 1.6'
+  ],
+  // droplet — colours
+  color: ['M8 1.7s4.5 4.4 4.5 7a4.5 4.5 0 0 1-9 0c0-2.6 4.5-7 4.5-7z'],
+  // calculator — arithmetic
+  calc: [
+    'M4.2 1.8h7.6a1 1 0 0 1 1 1v10.4a1 1 0 0 1-1 1H4.2a1 1 0 0 1-1-1V2.8a1 1 0 0 1 1-1z',
+    'M5.6 4.6h4.8',
+    'M5.8 8h.02M8 8h.02M10.2 8h.02M5.8 10.8h.02M8 10.8h.02M10.2 10.8h.02'
+  ],
+  // hash — number bases
+  base: ['M6.2 2.5 5 13.5M11 2.5 9.8 13.5M2.7 5.9h10.6M2.4 10.1h10.6'],
+  // braces — encoded payloads
+  decode: [
+    'M6.3 2.5c-1.6 0-1.6 1.5-1.6 3.1S3.9 7.9 3.1 7.9c.8 0 1.6.7 1.6 2.3s0 3.3 1.6 3.3',
+    'M9.7 2.5c1.6 0 1.6 1.5 1.6 3.1s.8 2.3 1.6 2.3c-.8 0-1.6.7-1.6 2.3s0 3.3-1.6 3.3'
+  ],
+  // T — text transforms
+  text: ['M3.2 3.7h9.6M8 3.7v8.6M5.9 12.3h4.2'],
+  // shrinking rules — summarise
+  summarize: ['M3 4.4h10M3 8h10M3 11.6h6'],
+  // bulleted list — key points
+  list: ['M4 4.4h.02M4 8h.02M4 11.6h.02', 'M7 4.4h6M7 8h6M7 11.6h6'],
+
   chevronRight: ['M6.2 3.6 10.6 8l-4.4 4.4'],
   chevronLeft: ['M9.8 3.6 5.4 8l4.4 4.4'],
   copy: [

@@ -13,6 +13,7 @@ import { el, replaceContent, spinner, actionRow } from '../kit.js';
 import { LANGUAGES, languageName } from '../../common/languages.js';
 import { detectLanguage, baseTag } from './langdetect.js';
 import { AI } from '../../common/constants.js';
+import { looksLikeLanguage } from '../../common/text.js';
 
 const MAX_LEN = 4000;
 
@@ -23,7 +24,8 @@ export default {
 
   matches(text, settings) {
     if (!text || text.length > MAX_LEN) return null;
-    if (!/[\p{L}]/u.test(text)) return null;
+    // Hex colours, JWTs and hashes contain letters but aren't language.
+    if (!looksLikeLanguage(text)) return null;
 
     const guess = detectLanguage(text);
     const foreign =

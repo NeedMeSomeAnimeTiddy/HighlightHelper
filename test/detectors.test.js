@@ -13,7 +13,14 @@ import unit from '../src/content/detectors/unit.js';
 import jargon from '../src/content/detectors/jargon.js';
 import rewrite from '../src/content/detectors/rewrite.js';
 import translate from '../src/content/detectors/translate.js';
-import { detect } from '../src/content/detectors/index.js';
+import color from '../src/content/detectors/color.js';
+import datetime from '../src/content/detectors/datetime.js';
+import calc from '../src/content/detectors/calc.js';
+import numberbase from '../src/content/detectors/numberbase.js';
+import decode from '../src/content/detectors/decode.js';
+import texttools from '../src/content/detectors/texttools.js';
+import summarize from '../src/content/detectors/summarize.js';
+import { detect, LIST } from '../src/content/detectors/index.js';
 
 let passed = 0;
 const failures = [];
@@ -128,18 +135,172 @@ check('digits only, no match', tr('12345'), null);
 
 /* ---------- registry ---------- */
 
-check('"$50" offers only the currency tab',
+check('"$50" offers only the currency row',
   detect('$50', S({ targetCurrency: 'EUR' })).map((h) => h.detector.id),
   ['currency']);
+check('text tools stays off a purely numeric selection',
+  texttools.matches('1,700,000', S()), null);
 check('foreign text ranks translate first',
   detect('El gato está en la mesa de la cocina', S())[0].detector.id,
   'translate');
+check('a hex colour ranks colour first',
+  detect('#ff0000', S())[0].detector.id, 'color');
+check('a timestamp ranks datetime first',
+  detect('1700000000', S())[0].detector.id, 'datetime');
+check('text tools is always ranked last',
+  detect('The quick brown fox jumped over the lazy dog today.', S()).at(-1).detector.id,
+  'texttools');
+
+// Every detector must be registered, toggleable, and expose the same shape.
+check('every detector has a settings toggle',
+  LIST.every((d) => d.id in DEFAULTS.detectors), true);
+check('no orphaned toggles',
+  Object.keys(DEFAULTS.detectors).every((id) => LIST.some((d) => d.id === id)), true);
+check('every detector implements the interface',
+  LIST.every((d) => typeof d.matches === 'function' && typeof d.items === 'function' &&
+    typeof d.title === 'string' && typeof d.priority === 'number'), true);
+check('detector ids are unique', new Set(LIST.map((d) => d.id)).size, LIST.length);
 check('a disabled detector is skipped',
   detect('$50', S({
     targetCurrency: 'EUR',
     detectors: { ...DEFAULTS.detectors, currency: false }
   })).some((h) => h.detector.id === 'currency'),
   false);
+
+/* ---------- colour ---------- */
+
+const col = (text) => {
+  const m = color.matches(text, S());
+  return m ? [m.rgb, +m.alpha.toFixed(2)] : null;
+};
+
+check('#ff0000', col('#ff0000'), [[255, 0, 0], 1]);
+check('#f00 shorthand', col('#f00'), [[255, 0, 0], 1]);
+check('#RRGGBBAA', col('#ff000080'), [[255, 0, 0], 0.5]);
+check('rgb()', col('rgb(0, 128, 255)'), [[0, 128, 255], 1]);
+check('rgba() with alpha', col('rgba(0,128,255,0.5)'), [[0, 128, 255], 0.5]);
+check('hsl() red', col('hsl(0, 100%, 50%)'), [[255, 0, 0], 1]);
+check('hsl() teal', col('hsl(180, 100%, 25%)'), [[0, 128, 128], 1]);
+check('a bare word is not a colour', col('tomato'), null);
+check('hex without # is not a colour', col('ff0000'), null);
+
+/* ---------- date & time ---------- */
+
+const dt = (text) => {
+  const m = datetime.matches(text, S());
+  return m ? [m.kind, m.date.toISOString()] : null;
+};
+
+check('Unix seconds', dt('1700000000'), ['Unix seconds', '2023-11-14T22:13:20.000Z']);
+check('Unix milliseconds', dt('1700000000000'), ['Unix milliseconds', '2023-11-14T22:13:20.000Z']);
+check('ISO date only', dt('2024-03-15'), ['ISO date', '2024-03-15T00:00:00.000Z']);
+check('ISO with time', dt('2024-03-15T10:30:00Z'), ['ISO 8601', '2024-03-15T10:30:00.000Z']);
+check('a year is not a timestamp', dt('2024'), null);
+check('small numbers are not timestamps', dt('12345'), null);
+check('prose is not parsed', dt('next friday'), null);
+
+/* ---------- calculator ---------- */
+
+const ca = (text) => {
+  const m = calc.matches(text, S());
+  return m ? m.value : null;
+};
+
+check('12 * 8 + 3', ca('12 * 8 + 3'), 99);
+check('precedence', ca('2 + 3 * 4'), 14);
+check('brackets', ca('(4 + 5) / 2'), 4.5);
+check('exponent, right assoc', ca('2^3^2'), 512);
+check('unary minus', ca('-5 + 3'), -2);
+check('thousands separators', ca('1,000 + 250'), 1250);
+check('percent of', ca('15% of 240'), 36);
+check('percent delta', ca('200 + 15%'), 230);
+check('a bare number is not a calculation', ca('42'), null);
+check('money is left to the currency detector', ca('$20 + $5'), null);
+check('prose is not a calculation', ca('two plus two'), null);
+check('unbalanced brackets rejected', ca('(4 + 5'), null);
+check('trailing operator rejected', ca('4 +'), null);
+
+/* ---------- number bases ---------- */
+
+const nb = (text) => {
+  const m = numberbase.matches(text, S());
+  return m ? [m.source, m.value.toString(10)] : null;
+};
+
+check('hex', nb('0x1F4'), ['hexadecimal', '500']);
+check('#RRGGBB is left to the colour detector', nb('#3f8ae0'), null);
+check('binary', nb('0b1011'), ['binary', '11']);
+check('octal', nb('0o755'), ['octal', '493']);
+check('large decimal', nb('65536'), ['decimal', '65536']);
+check('a year is skipped', nb('2024'), null);
+check('a timestamp is skipped', nb('1700000000'), null);
+check('small numbers are skipped', nb('42'), null);
+
+/* ---------- decode ---------- */
+
+const de = (text) => {
+  const m = decode.matches(text, S());
+  return m ? m.kind : null;
+};
+
+// {"alg":"HS256","typ":"JWT"} . {"sub":"123","name":"Ada"} . sig
+const JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9' +
+  '.eyJzdWIiOiIxMjMiLCJuYW1lIjoiQWRhIn0.abc123';
+check('JWT', de(JWT), 'jwt');
+check('JWT payload decoded',
+  decode.matches(JWT, S()).payload.name, 'Ada');
+check('JSON', de('{"a":1,"b":[2,3]}'), 'json');
+check('URL-encoded', de('hello%20world%21%20caf%C3%A9'), 'url');
+check('base64', de('SGVsbG8gdGhlcmUsIHdvcmxkIQ=='), 'base64');
+check('base64 decodes correctly',
+  decode.matches('SGVsbG8gdGhlcmUsIHdvcmxkIQ==', S()).text, 'Hello there, world!');
+check('a plain word is not base64', de('Highlighting'), null);
+check('broken JSON is not JSON', de('{"a":1,'), null);
+check('ordinary prose is not encoded', de('The quick brown fox jumps'), null);
+
+/* ---------- text tools ---------- */
+
+const tt = texttools.matches('Hello brave new world', S());
+check('text tools counts words', tt.stats.words, 4);
+check('text tools counts characters', tt.stats.characters, 21);
+check('text tools needs some content', texttools.matches('  ', S()), null);
+check('text tools ignores pure punctuation', texttools.matches('!!!', S()), null);
+
+const ttRows = texttools.items({ text: 'Hello brave new world', match: tt, settings: S(), api: {} });
+check('text tools contributes one row', ttRows.length, 1);
+check('text tools row shows the count', ttRows[0].value, '4 words');
+
+/* ---------- summarise ---------- */
+
+const longText = 'The committee met on Tuesday to review the quarterly figures. '.repeat(6);
+check('summarise matches long prose', Boolean(summarize.matches(longText, S())), true);
+check('summarise ignores a short line', summarize.matches('A short line.', S()), null);
+check('summarise offers two rows',
+  summarize.items({ text: longText, match: summarize.matches(longText, S()), settings: S(), api: {} })
+    .map((r) => r.key),
+  ['summarize', 'keypoints']);
+
+/* ---------- catch-all detectors stay out of the way ---------- */
+
+// A hex colour, a JWT and an arithmetic expression each have a detector that
+// owns them; the shape-based detectors must not pile extra rows on top.
+const idsFor = (text, settings = S()) => detect(text, settings).map((h) => h.detector.id);
+
+check('a hex colour offers only the colour row', idsFor('#3f8ae0'), ['color']);
+check('a JWT offers only the decode row', idsFor(JWT), ['decode']);
+check('an arithmetic expression offers only the result',
+  idsFor('15% of 240'), ['calc']);
+check('a timestamp offers only the date row', idsFor('1700000000'), ['datetime']);
+check('a hex literal offers only the base row', idsFor('0x1F4'), ['numberbase']);
+
+check('translate skips a hex colour', translate.matches('#3f8ae0', S()), null);
+check('translate skips a JWT', translate.matches(JWT, S()), null);
+check('rewrite skips a JWT', rewrite.matches(JWT, S()), null);
+check('text tools skips a hex colour', texttools.matches('#3f8ae0', S()), null);
+check('text tools still handles an identifier',
+  Boolean(texttools.matches('user_id_2', S())), true);
+check('rewrite needs at least five words',
+  rewrite.matches('one two three four', S({ minRewriteChars: 5 })), null);
 
 /* ---------- menu rows ---------- */
 

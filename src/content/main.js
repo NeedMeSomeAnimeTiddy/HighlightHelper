@@ -428,6 +428,22 @@ function animateViewsTo(target) {
 }
 
 /**
+ * Plays an entrance transition, without depending on requestAnimationFrame.
+ *
+ * The class is added, a reflow is forced so the browser commits that as the
+ * start state, then it is removed again in the same synchronous pass — which
+ * transitions to the resting state. The resting class list is the *visible*
+ * one, so if frames never arrive (throttled renderer, background tab) the
+ * element is shown anyway. Revealing something must never be something that
+ * has to happen; it must be what happens when nothing does.
+ */
+function playEnter(node, ...fromClasses) {
+  node.classList.add('hh-enter', ...fromClasses);
+  void node.offsetWidth; // commit the start state
+  node.classList.remove('hh-enter', ...fromClasses);
+}
+
+/**
  * Keeps the panel on screen when a view grows on its own. Purely positional —
  * sizing is the browser's job now, so a missing ResizeObserver costs nothing.
  */
@@ -443,24 +459,29 @@ function observeView(node) {
 
 function showView(view, direction) {
   const outgoing = viewsEl.lastElementChild;
+  if (outgoing === view.node) return; // already showing
 
-  view.node.classList.add('hh-view', 'hh-enter',
-    direction === 'back' ? 'hh-from-left' : 'hh-from-right');
+  // Views are kept on the stack and re-shown on Back, so this node may still
+  // be wearing the exit classes from when it slid away — which would bring it
+  // back invisible (opacity 0), unclickable and out of flow.
+  view.node.classList.remove('hh-view--out', 'hh-out-left', 'hh-out-right');
+  view.node.classList.add('hh-view');
 
   if (outgoing) {
     outgoing.classList.add('hh-view--out',
       direction === 'back' ? 'hh-out-right' : 'hh-out-left');
-    setTimeout(() => outgoing.remove(), 200);
+    setTimeout(() => {
+      // A fast Back press can re-show this node before the timer fires; the
+      // class is cleared above, so its absence means "don't discard me".
+      if (outgoing.classList.contains('hh-view--out')) outgoing.remove();
+    }, 200);
   }
 
   viewsEl.append(view.node);
   renderChrome();
 
-  // Measure while the entering view is laid out but still transparent.
   animateViewsTo(view.node.offsetHeight);
-  requestAnimationFrame(() => {
-    view.node.classList.remove('hh-enter', 'hh-from-left', 'hh-from-right');
-  });
+  playEnter(view.node, direction === 'back' ? 'hh-from-left' : 'hh-from-right');
 
   observeView(view.node);
   activeRow = -1;
@@ -538,7 +559,7 @@ async function showIcon(selection) {
 
   ui.layer.replaceChildren(button);
   position(selection.anchorRect, { align: 'end' });
-  requestAnimationFrame(() => button.classList.add('hh-in'));
+  playEnter(button);
 }
 
 /** Collects menu rows from every detector that matched. */
@@ -610,7 +631,7 @@ async function openPanel({ openTo = null, forcedLanguage = null, forceIds = [] }
   stack.push({ title: '', node: root });
   showView(stack[0], 'forward');
 
-  requestAnimationFrame(() => panel.classList.add('hh-in'));
+  playEnter(panel);
 
   // Right-click "Translate to…" opens straight into the translation.
   if (openTo) {

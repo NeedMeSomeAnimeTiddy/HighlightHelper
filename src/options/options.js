@@ -13,11 +13,18 @@ import { LIST as DETECTOR_LIST } from '../content/detectors/index.js';
 const $ = (id) => document.getElementById(id);
 
 const DETECTOR_BLURB = {
+  color: 'Shows a swatch and converts #hex, rgb() and hsl(). Local.',
+  datetime: 'Unix timestamps and ISO dates in your local time. Local.',
   currency: 'Converts amounts like "$50" or "30 EUR" into your currency.',
-  unit: 'Converts miles, kg, °F and friends. Runs locally, no API calls.',
+  calc: 'Works out "12 * 8 + 3" or "15% of 240". Local.',
+  numberbase: 'Converts between decimal, hex, binary and octal. Local.',
+  unit: 'Converts miles, kg, °F and friends. Local, no API calls.',
+  decode: 'Decodes JWTs, base64 and URL-encoding; formats JSON. Local.',
   translate: 'Translates the selection. Uses DeepSeek.',
   jargon: 'One-line plain-English explanation of a term or acronym. Uses DeepSeek.',
-  rewrite: 'Fix grammar, or rewrite shorter / formal / casual. Uses DeepSeek.'
+  summarize: 'Summary or key points for a long selection. Uses DeepSeek.',
+  rewrite: 'Fix grammar, or rewrite shorter / formal / casual. Uses DeepSeek.',
+  texttools: 'Word count plus case conversion and slugs. Always available, ranked last.'
 };
 
 let settings = DEFAULTS;

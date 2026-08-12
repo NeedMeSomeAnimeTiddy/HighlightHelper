@@ -11,6 +11,7 @@
 
 import { el, menu, asyncView, quote, actionRow } from '../kit.js';
 import { AI } from '../../common/constants.js';
+import { wordCount, looksLikeLanguage, plural } from '../../common/text.js';
 
 const MAX_LEN = 6000;
 
@@ -21,11 +22,16 @@ const TONES = [
   { action: AI.CASUAL, icon: 'casual', label: 'More casual', busy: 'Loosening up…' }
 ];
 
+const MIN_WORDS = 5;
+
 /** Long enough to be worth rewriting, or clearly a full sentence. */
 function looksLikeProse(text, settings) {
   const t = text.trim();
+  // A 76-character JWT clears the character threshold but is not prose.
+  if (wordCount(t) < MIN_WORDS) return false;
+  if (!looksLikeLanguage(t)) return false;
   if (t.length >= settings.minRewriteChars) return true;
-  return t.split(/\s+/).length >= 6 && /[.!?]/.test(t);
+  return wordCount(t) >= 6 && /[.!?]/.test(t);
 }
 
 export default {
@@ -37,7 +43,7 @@ export default {
     const t = text.trim();
     if (!t || t.length > MAX_LEN) return null;
     if (!looksLikeProse(t, settings)) return null;
-    return { words: t.split(/\s+/).length, chars: t.length };
+    return { words: wordCount(t), chars: t.length };
   },
 
   items({ text, match }) {
@@ -45,7 +51,7 @@ export default {
       key: 'rewrite',
       icon: 'rewrite',
       label: 'Rewrite',
-      value: `${match.words} words`,
+      value: plural(match.words, 'word'),
       detailTitle: 'Rewrite',
       open: (api) => menu(
         TONES.map((tone) => ({

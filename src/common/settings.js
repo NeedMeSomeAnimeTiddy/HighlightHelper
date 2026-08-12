@@ -18,11 +18,18 @@ export const DEFAULTS = {
 
   /** Per-detector on/off switches, keyed by detector id. */
   detectors: {
+    color: true,
+    datetime: true,
     currency: true,
+    calc: true,
+    numberbase: true,
     unit: true,
+    decode: true,
     translate: true,
     jargon: true,
-    rewrite: true
+    summarize: true,
+    rewrite: true,
+    texttools: true
   },
 
   /** Master switch + per-origin opt-outs (hostnames). */

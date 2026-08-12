@@ -125,8 +125,10 @@ const SIGN = String.raw`[-−–]?\s?`;
 
 // Global: we walk every candidate so one rejected ambiguous hit ("5 in the
 // morning") doesn't hide a real one later in the same selection.
+// The lookahead excludes digits as well as letters: in "0x1F4" the F sits
+// between digits and is a hex nibble, not Fahrenheit.
 const RE_SIMPLE = new RegExp(
-  String.raw`(${SIGN}(?:${NUMBER_SRC}))\s*(${ALIAS_SRC})(?![\p{L}])`,
+  String.raw`(${SIGN}(?:${NUMBER_SRC}))\s*(${ALIAS_SRC})(?![\p{L}\p{N}])`,
   'giu'
 );
 
@@ -134,9 +136,12 @@ const RE_SIMPLE = new RegExp(
    "72 f" in prose does not silently become Fahrenheit. */
 const RE_TEMP = new RegExp(
   String.raw`(${SIGN}(?:${NUMBER_SRC}))\s*(?:(°|º|\bdeg(?:ree)?s?\.?)\s*)?` +
-  String.raw`(celsius|centigrade|fahrenheit|kelvin|℃|℉|C|F|K)(?![\p{L}])`,
+  String.raw`(celsius|centigrade|fahrenheit|kelvin|℃|℉|C|F|K)(?![\p{L}\p{N}])`,
   'iu'
 );
+
+/** Numeric literals in another base — the numberbase detector owns those. */
+const RE_BASE_LITERAL = /^0[xbo][0-9a-f]+$/i;
 
 function tempScale(token) {
   const t = token.toLowerCase();
@@ -390,6 +395,7 @@ export default {
   matches(text, settings) {
     if (!text || text.length > MAX_LEN) return null;
     if (!/\d/.test(text)) return null;
+    if (RE_BASE_LITERAL.test(text.trim())) return null;
     const found = findMeasurement(text, settings);
     if (!found) return null;
     const result = convert(found, settings);

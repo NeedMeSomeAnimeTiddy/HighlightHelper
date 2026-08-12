@@ -20,7 +20,9 @@ export const AI = {
   FIX: 'fix',
   SHORTER: 'shorter',
   FORMAL: 'formal',
-  CASUAL: 'casual'
+  CASUAL: 'casual',
+  SUMMARIZE: 'summarize',
+  KEYPOINTS: 'keypoints'
 };
 
 /** Sentinel error codes the UI reacts to specially. */

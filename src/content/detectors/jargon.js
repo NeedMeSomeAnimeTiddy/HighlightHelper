@@ -10,6 +10,7 @@
 
 import { el, asyncView, copyButton } from '../kit.js';
 import { AI } from '../../common/constants.js';
+import { letterRatio } from '../../common/text.js';
 
 const MAX_CHARS = 48;
 const MAX_WORDS = 4;
@@ -39,7 +40,10 @@ export default {
     const t = text.trim();
     if (!t || t.length > MAX_CHARS) return null;
     if (/[.!?;]$/.test(t)) return null;               // a sentence, not a term
-    if (!/[\p{L}]/u.test(t)) return null;             // needs at least a letter
+    // Must start with a letter and be mostly letters. Without this, "#3f8ae0"
+    // and "15% of 240" both read as terms worth explaining.
+    if (!/^\p{L}/u.test(t)) return null;
+    if (letterRatio(t) < 0.6) return null;
 
     const words = t.split(/\s+/);
     if (words.length > MAX_WORDS) return null;

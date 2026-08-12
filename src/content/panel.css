@@ -100,13 +100,19 @@
   color: var(--hh-fg);
   box-shadow: var(--hh-shadow);
   cursor: pointer;
-  opacity: 0;
-  transform: translateY(3px);
+  opacity: 1;
+  transform: none;
   transition: opacity 90ms ease-out, transform 90ms ease-out,
     background-color 90ms ease-out;
 }
 
-.hh-icon.hh-in { opacity: 1; transform: none; }
+/*
+ * Entrance state. Note the direction: the *resting* class list is the visible
+ * one, and `hh-enter` is added then removed synchronously (see playEnter in
+ * main.js). If frames never arrive — a throttled renderer, a background tab —
+ * the element is still visible, because nothing has to run to reveal it.
+ */
+.hh-icon.hh-enter { opacity: 0; transform: translateY(3px); }
 .hh-icon:hover { background: var(--hh-hover); }
 .hh-icon:focus-visible { outline: 2px solid var(--hh-accent); outline-offset: 1px; }
 .hh-mark { width: 15px; height: 15px; display: block; }
@@ -123,12 +129,12 @@
   border-radius: var(--hh-radius);
   box-shadow: var(--hh-shadow);
   overflow: hidden;
-  opacity: 0;
-  transform: translateY(3px);
+  opacity: 1;
+  transform: none;
   transition: opacity 90ms ease-out, transform 90ms ease-out;
 }
 
-.hh-panel.hh-in { opacity: 1; transform: none; }
+.hh-panel.hh-enter { opacity: 0; transform: translateY(3px); }
 
 .hh-head {
   display: flex;
@@ -196,8 +202,8 @@
 }
 
 .hh-view.hh-enter { opacity: 0; }
-.hh-view.hh-from-right { transform: translateX(10px); }
-.hh-view.hh-from-left { transform: translateX(-10px); }
+.hh-view.hh-enter.hh-from-right { transform: translateX(10px); }
+.hh-view.hh-enter.hh-from-left { transform: translateX(-10px); }
 
 .hh-view--out {
   position: absolute;
@@ -393,12 +399,41 @@
   color: var(--hh-muted);
 }
 
-.hh-fact em { font-style: normal; }
+.hh-fact em { font-style: normal; flex: 0 0 auto; }
+
+/* Monospace for values you might retype: hex, ISO dates, decoded claims. */
+.hh-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 11.5px;
+}
+
+/* Colour detector: the swatch is checkerboarded so alpha is visible. */
+.hh-swatch-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.hh-swatch {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--hh-border);
+  background-image:
+    linear-gradient(var(--swatch), var(--swatch)),
+    conic-gradient(#c9ccd1 0 25%, #ffffff 0 50%, #c9ccd1 0 75%, #ffffff 0);
+  background-size: 100% 100%, 12px 12px;
+}
 
 .hh-fact span {
+  min-width: 0;
   color: var(--hh-fg);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .hh-note { margin: 0; color: var(--hh-muted); font-size: 11.5px; }
@@ -489,6 +524,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hh-icon, .hh-panel, .hh-view, .hh-views { transition: none; }
+  /* Nothing to reveal — the resting state was already the visible one. */
+  .hh-icon.hh-enter, .hh-panel.hh-enter, .hh-view.hh-enter {
+    opacity: 1;
+    transform: none;
+  }
   .hh-spinner { animation-duration: 1.6s; }
   .hh-dots { animation: none; opacity: 0.6; }
 }

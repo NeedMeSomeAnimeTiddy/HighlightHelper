@@ -38,13 +38,23 @@
  * id to DEFAULTS.detectors in src/common/settings.js.
  */
 
+import color from './color.js';
+import datetime from './datetime.js';
 import currency from './currency.js';
+import calc from './calc.js';
+import numberbase from './numberbase.js';
 import unit from './unit.js';
+import decode from './decode.js';
 import translate from './translate.js';
 import jargon from './jargon.js';
+import summarize from './summarize.js';
 import rewrite from './rewrite.js';
+import texttools from './texttools.js';
 
-export const LIST = [currency, unit, translate, jargon, rewrite];
+export const LIST = [
+  color, datetime, currency, calc, numberbase, unit,
+  decode, translate, jargon, summarize, rewrite, texttools
+];
 
 export function getDetector(id) {
   return LIST.find((d) => d.id === id);
