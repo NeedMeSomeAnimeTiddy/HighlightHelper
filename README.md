@@ -63,6 +63,15 @@ There is no build step and no dependencies. Load the folder straight into Chrome
 
 Requires Chrome 111 or newer.
 
+**After pulling changes, press the ↻ reload button** on the Highlight Helper card at
+`chrome://extensions`. Chrome does not pick up edits to an unpacked extension on its own, and
+a changed `manifest.json` always needs one.
+
+Right-click menu entries are the one thing that can look stale even after a reload, because
+Chrome stores them in your profile rather than reading them from the extension. The worker
+fingerprints the menu and rebuilds it whenever the fingerprint changes, so it heals itself —
+but the *new worker code* still has to be loaded first, which is what the reload does.
+
 ## Add your DeepSeek API key
 
 Currency and unit conversion work immediately. The explain, translate, and rewrite tools
@@ -257,6 +266,12 @@ and `detectors/codelang.js` they cheerfully offer to translate a hex colour, rew
 and QR-encode a whole paragraph. A selection like `#3f8ae0` already has a detector that owns
 it; a second, useless row is pure noise. "Fix spelling & grammar" pointed at a function body
 is worse than noise, which is why `rewrite` refuses anything `isCode()` recognises.
+
+**Why the context menu is fingerprinted.** Chrome keeps context menus in the browser profile,
+not in the extension — they persist until something removes them. Building them only on
+`onInstalled`/`onStartup` means a changed menu can stay stale indefinitely, which looks
+exactly like the new code never shipped. So the worker hashes the menu tree, stores the hash,
+and compares on every start: one storage read in the common case, a rebuild when they differ.
 
 **How the right-click menu stays in step.** Each context-menu id in `common/tools.js` is also
 a menu-row `key`, so a click is just "open the panel and drill to this row" — including two

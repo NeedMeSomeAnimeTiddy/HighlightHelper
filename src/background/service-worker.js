@@ -11,7 +11,7 @@ import { getSettings, getApiKey } from '../common/settings.js';
 import { CONTEXT_MENU_LANGUAGES, languageName } from '../common/languages.js';
 import { CONTEXT_TOOLS } from '../common/tools.js';
 import { cacheGet, cacheSet, cacheClear, cacheStats } from './cache.js';
-import { cacheKey } from '../common/hash.js';
+import { cacheKey, hash } from '../common/hash.js';
 import { getRates, clearRates } from './rates.js';
 import { runAi, testApiKey } from './deepseek.js';
 
@@ -79,8 +79,36 @@ async function buildContextMenus() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(buildContextMenus);
-chrome.runtime.onStartup.addListener(buildContextMenus);
+/**
+ * Context menus live in the browser profile, not in this file — they survive
+ * until something removes them. Rebuilding only on install/startup means a
+ * changed menu can stay stale indefinitely: the previous version's entries
+ * simply persist, which looks exactly like the new code never shipped.
+ *
+ * So the current menu is fingerprinted and the fingerprint stored. Every time
+ * the worker wakes it compares, and rebuilds when they differ — one storage
+ * read in the common case, and no way for the menu to drift from the code.
+ */
+const MENU_SIGNATURE = hash(JSON.stringify([CONTEXT_TOOLS, CONTEXT_MENU_LANGUAGES]));
+
+async function ensureContextMenus({ force = false } = {}) {
+  try {
+    if (!force) {
+      const { menuSignature } = await chrome.storage.local.get('menuSignature');
+      if (menuSignature === MENU_SIGNATURE) return;
+    }
+    await buildContextMenus();
+    await chrome.storage.local.set({ menuSignature: MENU_SIGNATURE });
+  } catch (err) {
+    console.error('[Highlight Helper] could not build the context menu:', err);
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => ensureContextMenus({ force: true }));
+chrome.runtime.onStartup.addListener(() => ensureContextMenus({ force: true }));
+
+// Also on every worker start, so a stale menu heals itself without a reload.
+ensureContextMenus();
 
 /**
  * Delivers a message to the page, injecting the content script first if it
