@@ -450,6 +450,10 @@
  */
 .hh-source { margin-top: 10px; }
 
+/* Derived topics sit above the card they select. */
+.hh-topics { margin-bottom: 7px; }
+.hh-topics .hh-btn { font-size: 11.5px; padding: 3px 8px; height: auto; }
+
 .hh-source-card {
   padding: 9px 10px;
   border: 1px solid var(--hh-border);

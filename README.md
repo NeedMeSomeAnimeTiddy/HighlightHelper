@@ -28,12 +28,12 @@ selection actually is:
 | `37.7749, -122.4194`, `37°46'29"N 122°25'09"W` | Decimal and DMS, with OpenStreetMap and Google Maps buttons | No — local |
 | `/^(\d{3})-(\d{4})$/gi` | A token-by-token breakdown, indented by group depth, plus what each flag does | No — local |
 | A link, an address, a wifi string | A scannable QR code | No — local |
-| A code snippet | *Explain this code*, and *Add comments* returning the same code with comments added | Yes, when you pick the row |
+| A code snippet | *Explain this code* with **Find a source**, and *Add comments* returning the same code with comments added | Yes, when you pick the row |
 | `65 mph`, `180 lbs`, `72°F`, `5'11"` | The converted measurement in the row. Open it for extras like ft+in or Kelvin | No — local |
 | A JWT, base64, `%20` escapes, JSON | Decoded or pretty-printed. JWT claims are listed, with `exp`/`iat` as real dates and an expiry warning | No — local |
 | `SLA`, `CI/CD`, `technical debt` | *Explain this* → one plain-English sentence, then **Find a source** for a real encyclopedia entry | Explain yes; the source lookup is free |
 | Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
-| A paragraph or more | *Summarise* and *Key points* | Yes, when you pick the row |
+| A paragraph or more | *Summarise* and *Key points*, both with **Find a source** | Yes, when you pick the row |
 | A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual / Continue writing, each with **Copy** and **Replace** | Yes, when you pick a tone |
 | Any text | *Text tools* → word/character counts, reading time, and UPPER / lower / Title / Sentence / camel / Pascal / snake / kebab / slug | No — local |
 
@@ -243,8 +243,8 @@ whatever we do: Chrome's PDF viewer, `chrome://` pages, and the Web Store.
 
 ## Find a source
 
-After *Explain this* answers, a **Find a source** button appears. It does **not** ask the
-model for a citation.
+**Find a source** appears after *Explain this*, *Explain this code*, *Summarise* and
+*Key points*. It does **not** ask the model for a citation.
 
 DeepSeek has no web access. Asking it for sources produces well-formatted, confident,
 entirely invented URLs — worse than offering nothing, because a fabricated citation reads as
@@ -252,6 +252,25 @@ authoritative. So the button ignores the model and looks the term up in Wikipedi
 API: a real article, a real extract, a real link. It is labelled *"an independent reference,
 not a citation for the explanation above"* because that is exactly what it is — something to
 weigh the explanation against, not evidence for it.
+
+### What gets looked up
+
+A highlighted term *is* the search term. A code snippet and a paragraph are not — searching
+Wikipedia for a whole paragraph returns noise — so for those the model is asked one narrow
+question first: **name up to three things in this text an encyclopedia would have an article
+on.** Then those names are looked up for real.
+
+This is the one job the model can safely do here. It chooses *what to search for*; Wikipedia
+decides whether such an article exists. A topic it invented simply finds nothing — it cannot
+turn into a fabricated citation. Its reply is parsed defensively too: bullets and numbering
+stripped, duplicates collapsed, and anything sentence-length discarded rather than fired at a
+search box.
+
+For a summary, topics come from the **original text**, not the summary, so nothing the model
+introduced while condensing can become a search term of its own.
+
+Only the first topic is looked up; the rest are buttons, so the usual case costs one search
+rather than three.
 
 **Ambiguity is the normal case**, so the panel never silently commits to one reading. "SLA"
 and "Mercury" each have several plausible articles, and the alternatives stay on screen as
@@ -285,6 +304,9 @@ DeepSeek calls are cheap but not free, so:
 
 - Nothing is sent on selection. Every AI tool waits for a click
 - Currency and unit conversion never call DeepSeek at all
+- **Find a source** is free after *Explain this* — the term is already known. After *Explain
+  this code* or *Summarise* it costs one extra call to work out the topics, and the Wikipedia
+  lookups themselves are always free
 - Every answer is cached in `chrome.storage.local` keyed by
   `action + model + options + hash(text)`, for 7 days by default. Re-selecting the same text
   and pressing the same button is a storage read, not a request. Cached results are labelled
@@ -495,7 +517,7 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-217 assertions over number parsing, every detector's `matches()`, menu row construction,
+242 assertions over number parsing, every detector's `matches()`, menu row construction,
 ordering, the QR encoder and its round trip, the right-click menu's ids, and that every AI
 action a menu row can send has a prompt waiting for it — including a block that pins down
 what the catch-all detectors must *not* claim. No framework, no

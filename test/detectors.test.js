@@ -21,6 +21,7 @@ import decode from '../src/content/detectors/decode.js';
 import texttools, { TRANSFORMS as TEXT_TRANSFORMS } from '../src/content/detectors/texttools.js';
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import { AI, ERR } from '../src/common/constants.js';
+import { parseTopics } from '../src/common/text.js';
 import { buildPrompt } from '../src/background/deepseek.js';
 import { wikiLang, searchUrl, summaryUrl, isUsable, searchLinks, rankByContext }
   from '../src/background/wikipedia.js';
@@ -589,6 +590,24 @@ check('no context leaves Wikipedia order alone',
   rankByContext(SLA_CANDIDATES, '')[0].title, 'Symbionese Liberation Army');
 check('unrelated context leaves the order alone',
   rankByContext(SLA_CANDIDATES, 'zzz qqq vvv')[0].title, 'Symbionese Liberation Army');
+
+// Topic parsing feeds a search box, so it has to survive whatever shape the
+// model replies in, and refuse to turn prose into a nonsense query.
+check('plain lines', parseTopics('QR code\nReed–Solomon error correction'),
+  ['QR code', 'Reed–Solomon error correction']);
+check('bullets and numbering stripped',
+  parseTopics('- QR code\n2. Galois field\n* Barcode'), ['QR code', 'Galois field', 'Barcode']);
+check('wrapping quotes stripped', parseTopics('"Service-level agreement"'),
+  ['Service-level agreement']);
+check('capped at three', parseTopics('a1\nb2\nc3\nd4\ne5').length, 3);
+check('NONE means nothing to look up', parseTopics('NONE'), []);
+check('NONE with a full stop', parseTopics('None.'), []);
+check('duplicates collapse', parseTopics('QR code\nqr code\nBarcode'), ['QR code', 'Barcode']);
+check('a sentence is not a topic',
+  parseTopics('This text is mainly about the history of error correcting codes'), []);
+check('an over-long line is dropped', parseTopics(`${'x'.repeat(80)}\nQR code`), ['QR code']);
+check('empty reply', parseTopics(''), []);
+check('blank lines ignored', parseTopics('\n\nQR code\n\n'), ['QR code']);
 
 // Search fallbacks must be real URLs, not model-invented ones.
 const links = searchLinks('SLA', 'en');

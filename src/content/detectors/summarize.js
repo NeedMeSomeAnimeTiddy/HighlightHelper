@@ -8,7 +8,7 @@
  * Both cost a DeepSeek call, so nothing runs until a row is picked.
  */
 
-import { el, asyncView, actionRow } from '../kit.js';
+import { el, asyncView, actionRow, topicSourceButton } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode } from './codelang.js';
 
@@ -51,10 +51,16 @@ export default {
 function run(text, action, busy, label, api) {
   return asyncView(busy, async () => {
     const res = await api.ai(action, text);
-    return el('div', {},
+    const actions = actionRow(res.text, api);
+    const view = el('div', {},
       el('div', { class: 'hh-label', text: `${label}${res.cached ? ' · cached' : ''}` }),
       el('div', { class: 'hh-text', text: res.text }),
-      actionRow(res.text, api)
+      actions
     );
+    // A paragraph has no encyclopedia title. The topics are derived from the
+    // original text rather than the summary, so nothing the model introduced
+    // while condensing can become a search term of its own.
+    topicSourceButton(text, api, actions, { context: res.text });
+    return view;
   }, (err, retry) => api.errorFor(err, retry));
 }

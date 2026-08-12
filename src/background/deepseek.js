@@ -154,6 +154,21 @@ export function buildPrompt(action, text, options = {}) {
       };
     }
 
+    case AI.TOPICS:
+      return {
+        system:
+          "Name up to three things in the user's text that a general encyclopedia would " +
+          'have an article on — a technology, concept, standard, organisation, place or ' +
+          'person the text is actually about. One per line. No numbering, no bullets, no ' +
+          'explanation, nothing but the names. Prefer the specific over the generic: ' +
+          '"Reed–Solomon error correction", not "mathematics". Name only what is genuinely ' +
+          'present. If nothing in the text warrants an encyclopedia article, reply with the ' +
+          'single word NONE.',
+        user: text,
+        maxTokens: 60,
+        temperature: 0.1
+      };
+
     default:
       // Almost always a version skew rather than a typo — see ERR.STALE_WORKER.
       throw new Error(ERR.STALE_WORKER);

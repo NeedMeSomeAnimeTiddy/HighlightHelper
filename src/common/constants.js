@@ -32,7 +32,13 @@ export const AI = {
   KEYPOINTS: 'keypoints',
   CONTINUE: 'continue',
   EXPLAIN_CODE: 'explain-code',
-  COMMENT_CODE: 'comment-code'
+  COMMENT_CODE: 'comment-code',
+  /**
+   * Names things in the text worth looking up. The model only chooses what to
+   * search for — Wikipedia decides whether it exists, so an invented topic
+   * comes back as "no article" rather than as a fake citation.
+   */
+  TOPICS: 'topics'
 };
 
 /** Sentinel error codes the UI reacts to specially. */

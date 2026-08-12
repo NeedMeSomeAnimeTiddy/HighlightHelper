@@ -7,7 +7,8 @@
  */
 
 import { glyph } from './icons.js';
-import { MSG } from '../common/constants.js';
+import { MSG, AI } from '../common/constants.js';
+import { parseTopics } from '../common/text.js';
 
 /** el('div', { class: 'x', onclick: fn }, child, 'text') */
 export function el(tag, props = {}, ...children) {
@@ -195,27 +196,98 @@ export function resultView(text, api, { label = '', extra = [] } = {}) {
  * anything, so this is an independent lookup the reader can weigh against the
  * explanation, and the wording says so.
  */
+/** Looks one term up and renders the result into `into`. */
+async function lookupInto(into, api, term, context) {
+  replaceContent(into, spinner(`Looking up “${term}”…`));
+  try {
+    const res = await api.send({ type: MSG.SOURCE, term, context });
+    if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
+    const articles = res.articles || [];
+    replaceContent(into, articles.length
+      ? articleCard(articles, 0, into, api)
+      : noArticle(term, res.links));
+  } catch (err) {
+    replaceContent(into, errorBox(String(err.message || err)));
+  }
+  api.resize?.();
+}
+
+/** "Find a source" for a selection that already *is* the term — see jargon.js. */
 export function sourceButton(term, api, host, { context = '' } = {}) {
   const panel = el('div', { class: 'hh-source' });
-
-  const button = btn('Find a source', async () => {
+  const button = btn('Find a source', () => {
     button.replaceWith(panel);
-    replaceContent(panel, spinner('Looking for a reference…'));
-    try {
-      const res = await api.send({ type: MSG.SOURCE, term, context });
-      if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
-      const articles = res.articles || [];
-      replaceContent(panel, articles.length
-        ? articleCard(articles, 0, panel, api)
-        : noArticle(term, res.links));
-    } catch (err) {
-      replaceContent(panel, errorBox(String(err.message || err)));
-    }
-    api.resize?.();
+    lookupInto(panel, api, term, context);
   }, { icon: 'source' });
 
   host.append(button);
   return button;
+}
+
+/**
+ * "Find a source" for a selection with no obvious title — a code snippet or a
+ * paragraph of prose.
+ *
+ * Searching Wikipedia for a whole paragraph returns noise, so the model is
+ * asked what the text is *about* first. That is the one thing it can do here
+ * without risk: it picks the search term, and Wikipedia decides whether such an
+ * article exists. An invented topic simply finds nothing.
+ *
+ * Only the first topic is looked up; the others are buttons, so the common case
+ * costs one search rather than three.
+ */
+export function topicSourceButton(text, api, host, { context = '' } = {}) {
+  const panel = el('div', { class: 'hh-source' });
+
+  const button = btn('Find a source', async () => {
+    button.replaceWith(panel);
+    replaceContent(panel, spinner('Working out what this is about…'));
+    try {
+      const res = await api.ai(AI.TOPICS, text);
+      const topics = parseTopics(res.text);
+      if (!topics.length) {
+        replaceContent(panel, el('div', { class: 'hh-source-card' },
+          note('Nothing here that an encyclopedia would have an article on.')));
+        api.resize?.();
+        return;
+      }
+      replaceContent(panel, topicView(topics, api, context));
+      api.resize?.();
+    } catch (err) {
+      replaceContent(panel, api.errorFor
+        ? api.errorFor(err, () => button.click())
+        : errorBox(String(err.message || err)));
+      api.resize?.();
+    }
+  }, { icon: 'source' });
+
+  host.append(button);
+  return button;
+}
+
+/** Topic switcher: one row of subjects, one card for whichever is selected. */
+function topicView(topics, api, context) {
+  const wrap = el('div', {});
+  const card = el('div', {});
+  const buttons = [];
+
+  const select = (index) => {
+    buttons.forEach((b, i) => b.className = `hh-btn${i === index ? ' hh-primary' : ''}`);
+    lookupInto(card, api, topics[index], context);
+  };
+
+  topics.forEach((topic, i) => buttons.push(btn(topic, () => select(i))));
+
+  wrap.append(
+    topics.length > 1
+      ? el('div', { class: 'hh-row hh-topics' },
+          el('span', { class: 'hh-sub', text: 'In this text:' }), ...buttons)
+      : el('div', { class: 'hh-sub hh-topics', text: `In this text: ${topics[0]}` }),
+    card
+  );
+
+  select(0);
+  return wrap;
 }
 
 function openTab(url) {

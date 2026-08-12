@@ -9,7 +9,7 @@
  * more annoying than a wrong hint in a prompt the model can ignore.
  */
 
-import { el, asyncView, actionRow, copyButton } from '../kit.js';
+import { el, asyncView, actionRow, copyButton, topicSourceButton } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode, guessLanguage } from './codelang.js';
 
@@ -38,11 +38,17 @@ export default {
         detailTitle: match.language ? `${match.language} code` : 'Code',
         open: (api) => asyncView('Reading the code…', async () => {
           const res = await api.ai(AI.EXPLAIN_CODE, text, { language: match.language });
-          return el('div', {},
+          const actions = el('div', { class: 'hh-row' }, copyButton(res.text, api));
+          const view = el('div', {},
             el('div', { class: 'hh-text', text: res.text }),
-            el('div', { class: 'hh-row' }, copyButton(res.text, api)),
+            actions,
             res.cached ? el('p', { class: 'hh-sub', text: 'From cache' }) : null
           );
+          // A snippet has no encyclopedia title, so the topics are derived from
+          // it first — see kit.topicSourceButton. The explanation goes along as
+          // ranking context, the same as it does for a plain term.
+          topicSourceButton(text, api, actions, { context: res.text });
+          return view;
         }, (err, retry) => api.errorFor(err, retry))
       },
       {
