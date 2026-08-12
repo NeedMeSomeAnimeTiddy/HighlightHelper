@@ -20,7 +20,10 @@ const SCRIPTS = [
 ];
 
 const STOPWORDS = {
-  en: 'the of and to in that is it for on with as was be this are at by not from have but you'.split(' '),
+  // "a" and "i" belong here — leaving them out let Portuguese, which does list
+  // "a", win on any English text with a stray article in it.
+  en: ('the of and to a in that is it for on with as was be this are at by not from have but you ' +
+    'an or if we they their has had will can all one about there what when which would i he she').split(' '),
   es: 'el la los las de que y en un una para con no por como se su al lo pero más este'.split(' '),
   fr: 'le la les des du de et est dans pour que qui pas une avec sur au ce il ne plus'.split(' '),
   de: 'der die das und ist nicht ein eine für mit auf den dem des zu von sich auch als'.split(' '),

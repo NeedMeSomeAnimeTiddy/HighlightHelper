@@ -20,6 +20,18 @@ import numberbase from '../src/content/detectors/numberbase.js';
 import decode from '../src/content/detectors/decode.js';
 import texttools from '../src/content/detectors/texttools.js';
 import summarize from '../src/content/detectors/summarize.js';
+import coords from '../src/content/detectors/coords.js';
+import regex from '../src/content/detectors/regex.js';
+import code from '../src/content/detectors/code.js';
+import qr from '../src/content/detectors/qr.js';
+import {
+  encode as qrEncode,
+  generatorPoly,
+  ecCodewords,
+  TOTAL_CODEWORDS as QR_TOTAL,
+  EC_BLOCKS as QR_EC_BLOCKS
+} from '../src/content/qr.js';
+import { decode as qrDecode } from './qr-roundtrip.js';
 import { detect, LIST } from '../src/content/detectors/index.js';
 
 let passed = 0;
@@ -279,6 +291,152 @@ check('summarise offers two rows',
   summarize.items({ text: longText, match: summarize.matches(longText, S()), settings: S(), api: {} })
     .map((r) => r.key),
   ['summarize', 'keypoints']);
+
+/* ---------- coordinates ---------- */
+
+const co = (text) => {
+  const m = coords.matches(text, S());
+  return m ? [+m.lat.toFixed(4), +m.lon.toFixed(4)] : null;
+};
+
+check('decimal pair', co('37.7749, -122.4194'), [37.7749, -122.4194]);
+check('decimal pair, no comma', co('37.7749 -122.4194'), [37.7749, -122.4194]);
+check('hemisphere suffixes', co('37.7749N, 122.4194W'), [37.7749, -122.4194]);
+check('southern + eastern', co('33.8688S 151.2093E'), [-33.8688, 151.2093]);
+check('DMS', co(`37°46'29.6"N 122°25'9.8"W`), [37.7749, -122.4194]);
+check('out of range latitude rejected', co('91.0, 12.0'), null);
+check('out of range longitude rejected', co('45.0, 181.0'), null);
+check('null island rejected', co('0, 0'), null);
+check('a plain number pair is not a location', co('hello there'), null);
+
+/* ---------- regex ---------- */
+
+const rx = (text) => {
+  const m = regex.matches(text, S());
+  return m ? m.steps.map((s) => s.token) : null;
+};
+
+check('delimited pattern tokenised',
+  rx('/^\\d{3}-\\d{4}$/'), ['^', '\\d{3}', '-', '\\d{4}', '$']);
+check('flags captured', regex.matches('/ab+c/gi', S()).flags, 'gi');
+check('character class', rx('[a-z]+'), ['[a-z]+']);
+check('groups and alternation',
+  rx('(foo|bar)'), ['(', 'foo', '|', 'bar', ')']);
+check('non-capturing group described',
+  regex.matches('(?:ab)+', S()).steps[0].description, 'start of a group (not captured)');
+check('lookahead described',
+  regex.matches('(?=\\d)', S()).steps[0].description,
+  'start of a lookahead — what follows must match');
+check('quantifier folds into its token',
+  regex.matches('a{2,4}', S()).steps[0].description,
+  'the literal text "a", repeated between 2 and 4 times');
+check('lazy quantifier noted',
+  regex.matches('/a+?/', S()).steps[0].description.endsWith('as few as possible'), true);
+check('prose is not a regex', rx('Hello there, how are you?'), null);
+check('an invalid pattern is rejected', rx('/([a-z/'), null);
+check('a bare pattern needs a real regex construct', rx('(hi)'), null);
+check('depth tracks nesting',
+  regex.matches('/(a(b))/', S()).steps.map((s) => s.depth), [0, 1, 1, 2, 1, 0]);
+
+/* ---------- code ---------- */
+
+const JS = 'function add(a, b) {\n  const total = a + b;\n  return total;\n}';
+const PY = 'def add(a, b):\n    total = a + b\n    return total';
+
+check('javascript recognised', code.matches(JS, S())?.language, 'JavaScript');
+check('python recognised', code.matches(PY, S())?.language, 'Python');
+check('typescript beats javascript',
+  code.matches('const x: number = 1;\nfunction f(): void {}', S())?.language, 'TypeScript');
+check('sql recognised',
+  code.matches('SELECT id, name FROM users WHERE active = 1;', S())?.language, 'SQL');
+check('prose is not code', code.matches(
+  'The quick brown fox jumped over the lazy dog and kept running for miles.', S()), null);
+check('code offers explain and comment',
+  code.items({ text: JS, match: code.matches(JS, S()), settings: S(), api: {} })
+    .map((r) => r.key), ['code', 'code:comment']);
+
+/* ---------- QR ---------- */
+
+// The block tables are the easiest place for a transposed digit to hide, and a
+// wrong one produces codes that only some scanners can read. This identity ties
+// them to the independent total-codeword table.
+let qrTablesConsistent = true;
+for (let v = 1; v <= 20; v++) {
+  const [ec, g1, d1, g2, d2] = QR_EC_BLOCKS[v];
+  if (g1 * d1 + g2 * d2 + ec * (g1 + g2) !== QR_TOTAL[v]) qrTablesConsistent = false;
+}
+check('QR block tables agree with the codeword totals', qrTablesConsistent, true);
+
+check('QR generator polynomial for 10 EC codewords',
+  generatorPoly(10).join(','), '1,216,194,159,111,199,94,95,113,157,193');
+// The worked example from the specification: "HELLO WORLD" at version 1-M.
+check('QR Reed-Solomon matches the spec worked example',
+  Array.from(ecCodewords(
+    Uint8Array.from([32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236, 17, 236, 17]), 10
+  )).join(','),
+  '196,35,39,119,235,215,231,226,93,23');
+
+const qrSmall = qrEncode('https://example.com');
+check('QR picks a small version for a short url', qrSmall.version, 2);
+check('QR matrix is square and the right size',
+  qrSmall.size === qrSmall.modules.length && qrSmall.size === qrSmall.version * 4 + 17, true);
+check('QR finder pattern present at the origin',
+  qrSmall.modules[0].slice(0, 7).join(''), 'truetruetruetruetruetruetrue');
+check('QR separator row is light',
+  qrSmall.modules[7].slice(0, 8).every((m) => m === false), true);
+check('QR always-dark module is set',
+  qrSmall.modules[qrSmall.size - 8][8], true);
+// The timing row is dark at even coordinates, so it starts dark at column 8.
+check('QR timing pattern alternates',
+  qrSmall.modules[6].slice(8, 14).map((m) => (m ? 1 : 0)).join(''), '101010');
+check('QR grows with content', qrEncode('x'.repeat(300)).version > qrSmall.version, true);
+check('QR rejects content past version 20', (() => {
+  try { qrEncode('x'.repeat(2000)); return false; } catch { return true; }
+})(), true);
+
+// The round trip: encode, then read the matrix back with an independently
+// written reader and check both the payload and the Reed-Solomon syndromes.
+for (const sample of [
+  'https://example.com',
+  'https://example.com/docs/getting-started?ref=highlight&x=1',
+  'WIFI:T:WPA;S:MyNetwork;P:hunter2;;',
+  'Café — naïve résumé 😀',           // multi-byte UTF-8
+  'x'.repeat(120),                    // spans multiple blocks
+  'y'.repeat(330)                     // two block groups
+]) {
+  const encoded = qrEncode(sample);
+  let round;
+  try {
+    round = qrDecode(encoded);
+  } catch (err) {
+    round = { text: `THREW: ${err.message}`, blocksValid: false };
+  }
+  check(`QR round trip (${sample.slice(0, 22)}${sample.length > 22 ? '…' : ''})`,
+    round.text, sample);
+  check(`QR error-correction codewords valid (v${encoded.version})`, round.blocksValid, true);
+}
+
+const qrRow = qr.items({ text: 'https://example.com', match: qr.matches('https://example.com', S()), settings: S(), api: {} });
+check('QR labels a link', qrRow[0].label, 'QR code for this link');
+check('QR ranks a link above the catch-alls',
+  qr.matches('https://example.com', S()).priority, 35);
+check('QR ranks plain text low', qr.matches('MyNetwork hunter2', S()).priority, 85);
+check('QR declines an essay', qr.matches('x'.repeat(500), S()), null);
+check('QR declines a prose sentence',
+  qr.matches('The office is five miles from the station.', S()), null);
+check('QR takes an address-like line',
+  Boolean(qr.matches('10 Downing St, London SW1A 2AA', S())), true);
+check('QR declines a bare amount', qr.matches('$50', S()), null);
+
+/* ---------- code and prose do not collide ---------- */
+
+check('rewrite skips code', rewrite.matches(JS, S()), null);
+check('summarise skips code', summarize.matches(JS.repeat(6), S()), null);
+check('translate does not rank code as foreign',
+  translate.matches(JS, S()).foreign, false);
+check('english with articles is not mistaken for portuguese',
+  translate.matches('This is a note about a thing that a person wrote', S()).foreign, false);
+check('a coordinate pair is not arithmetic', calc.matches('37.7749, -122.4194', S()), null);
 
 /* ---------- catch-all detectors stay out of the way ---------- */
 

@@ -113,6 +113,47 @@ function buildPrompt(action, text, options = {}) {
         temperature: 0.3
       };
 
+    case AI.CONTINUE:
+      return {
+        system:
+          "Continue the user's text from exactly where it stops. Match its voice, tense, " +
+          'register and language, and stay on its subject. Two or three sentences. Reply ' +
+          'with the continuation only — do not repeat any of the text you were given, and ' +
+          'do not introduce it.',
+        user: text,
+        maxTokens: 350,
+        temperature: 0.7
+      };
+
+    case AI.EXPLAIN_CODE: {
+      const hint = options.language ? ` It is probably ${options.language}.` : '';
+      return {
+        system:
+          'Explain what the code does, in plain English, for a competent programmer who ' +
+          'has not seen it before. Lead with the one-sentence purpose, then the notable ' +
+          'details. Mention a bug or footgun only if you can point at the specific line. ' +
+          'No line-by-line narration, no markdown headings, no code fences.' + hint,
+        user: text,
+        maxTokens: 700,
+        temperature: 0.2
+      };
+    }
+
+    case AI.COMMENT_CODE: {
+      const hint = options.language ? ` The language is probably ${options.language}.` : '';
+      return {
+        system:
+          'Add comments to the code. Keep every line of the original exactly as it is, ' +
+          'including its indentation, and change nothing but the comments you insert. ' +
+          "Use the language's own comment syntax. Comment the why, not the obvious what; " +
+          'skip lines that speak for themselves. Reply with the code only — no fences, no ' +
+          'explanation before or after.' + hint,
+        user: text,
+        maxTokens: Math.min(3000, text.length + 800),
+        temperature: 0.2
+      };
+    }
+
     default:
       throw new Error(`Unknown AI action: ${action}`);
   }

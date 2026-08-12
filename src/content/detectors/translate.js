@@ -14,6 +14,7 @@ import { LANGUAGES, languageName } from '../../common/languages.js';
 import { detectLanguage, baseTag } from './langdetect.js';
 import { AI } from '../../common/constants.js';
 import { looksLikeLanguage } from '../../common/text.js';
+import { isCode } from './codelang.js';
 
 const MAX_LEN = 4000;
 
@@ -31,7 +32,11 @@ export default {
     const foreign =
       Boolean(guess.lang) &&
       guess.confidence >= 0.35 &&
-      baseTag(guess.lang) !== baseTag(settings.language);
+      baseTag(guess.lang) !== baseTag(settings.language) &&
+      // Identifiers and keywords fool a stopword guesser. Translating comments
+      // in a snippet is a fair thing to want, so the row stays — it just
+      // doesn't get to sit above the code rows.
+      !isCode(text);
 
     return {
       detected: guess.lang,

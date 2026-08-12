@@ -436,6 +436,73 @@
   text-align: right;
 }
 
+/* Continue writing: the original is dimmed so the new text stands out. */
+.hh-dim { color: var(--hh-muted); }
+
+/* Regex breakdown: one row per token, indented by group depth. */
+.hh-steps {
+  display: grid;
+  gap: 5px;
+}
+
+.hh-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hh-step-token {
+  flex: 0 0 auto;
+  max-width: 42%;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--hh-hover);
+  color: var(--hh-fg);
+  overflow-wrap: anywhere;
+}
+
+.hh-step-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--hh-muted);
+  font-size: 12px;
+}
+
+/* Commented code keeps its own indentation, so it scrolls rather than wraps. */
+.hh-code {
+  margin: 0 0 2px;
+  padding: 8px 9px;
+  border: 1px solid var(--hh-border);
+  border-radius: 6px;
+  background: var(--hh-hover);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 220px;
+}
+
+/*
+ * QR codes stay dark-on-light in both themes — inverting one makes it
+ * unreadable to a good number of scanners — so the frame carries its own
+ * white background rather than inheriting the panel surface.
+ */
+.hh-qr {
+  display: block;
+  width: 168px;
+  max-width: 100%;
+  margin: 0 auto 4px;
+  padding: 0;
+  border: 1px solid var(--hh-border);
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.hh-qr svg { display: block; width: 100%; height: auto; }
+
 .hh-note { margin: 0; color: var(--hh-muted); font-size: 11.5px; }
 .hh-note.hh-warn { color: var(--hh-danger); }
 

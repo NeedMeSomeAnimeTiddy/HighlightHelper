@@ -21,6 +21,9 @@ const RE_PCT_OF = /^\s*([\d.,]+)\s*(?:%|percent)\s+of\s+([\d.,]+)\s*$/i;
 const RE_PCT_DELTA = /^\s*([\d.,]+)\s*([+-])\s*([\d.,]+)\s*%\s*$/;
 // A pure arithmetic expression: digits, operators, brackets and separators only.
 const RE_EXPRESSION = /^[\d\s+\-*/^%().,×÷–—]+$/;
+// "37.7749, -122.4194" is a pair of numbers, not a subtraction. Without this
+// the tokeniser reads the comma as a separator and the minus as an operator.
+const RE_NUMBER_PAIR = /^\s*[-+]?[\d.]+\s*,\s*[-+]?[\d.]+\s*$/;
 
 const num = (s) => Number(String(s).replace(/,/g, ''));
 
@@ -137,6 +140,7 @@ function evaluate(text) {
     };
   }
 
+  if (RE_NUMBER_PAIR.test(text)) return null;
   if (!RE_EXPRESSION.test(text)) return null;
   // Needs at least one operator between numbers, or it's just a number.
   if (!/[+\-*/^%×÷]/.test(text.trim().replace(/^[-+]/, ''))) return null;

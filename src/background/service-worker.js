@@ -60,11 +60,14 @@ async function handleAi({ action, text, options = {} }) {
   const trimmed = (text || '').trim();
   if (!trimmed) throw new Error('Nothing to send');
 
+  // Anything that changes the answer has to be in the cache key, or a second
+  // call with a different target language would be served the first result.
+  const usesLanguage = action === AI.TRANSLATE || action === AI.EXPLAIN;
+  const usesCodeHint = action === AI.EXPLAIN_CODE || action === AI.COMMENT_CODE;
   const keyOpts = {
     model: options.model || settings.model,
-    ...(action === AI.TRANSLATE || action === AI.EXPLAIN
-      ? { language: options.language || settings.language }
-      : {})
+    ...(usesLanguage ? { language: options.language || settings.language } : {}),
+    ...(usesCodeHint ? { codeLanguage: options.language || '' } : {})
   };
   const key = cacheKey(action, trimmed, keyOpts);
   const ttl = Math.max(0, settings.cacheDays) * 24 * 60 * 60 * 1000;

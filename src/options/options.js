@@ -16,14 +16,18 @@ const DETECTOR_BLURB = {
   color: 'Shows a swatch and converts #hex, rgb() and hsl(). Local.',
   datetime: 'Unix timestamps and ISO dates in your local time. Local.',
   currency: 'Converts amounts like "$50" or "30 EUR" into your currency.',
+  coords: 'Latitude/longitude in decimal and DMS, with map links. Local.',
   calc: 'Works out "12 * 8 + 3" or "15% of 240". Local.',
   numberbase: 'Converts between decimal, hex, binary and octal. Local.',
+  regex: 'Breaks a regular expression down token by token. Local.',
   unit: 'Converts miles, kg, °F and friends. Local, no API calls.',
+  code: 'Explains a code selection, or adds comments to it. Uses DeepSeek.',
   decode: 'Decodes JWTs, base64 and URL-encoding; formats JSON. Local.',
   translate: 'Translates the selection. Uses DeepSeek.',
   jargon: 'One-line plain-English explanation of a term or acronym. Uses DeepSeek.',
   summarize: 'Summary or key points for a long selection. Uses DeepSeek.',
-  rewrite: 'Fix grammar, or rewrite shorter / formal / casual. Uses DeepSeek.',
+  rewrite: 'Fix grammar, rewrite in another tone, or continue writing. Uses DeepSeek.',
+  qr: 'Turns a link or short text into a scannable QR code. Local.',
   texttools: 'Word count plus case conversion and slugs. Always available, ranked last.'
 };
 

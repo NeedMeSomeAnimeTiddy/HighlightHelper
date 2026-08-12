@@ -41,19 +41,23 @@
 import color from './color.js';
 import datetime from './datetime.js';
 import currency from './currency.js';
+import coords from './coords.js';
 import calc from './calc.js';
 import numberbase from './numberbase.js';
+import regex from './regex.js';
 import unit from './unit.js';
+import code from './code.js';
 import decode from './decode.js';
 import translate from './translate.js';
 import jargon from './jargon.js';
 import summarize from './summarize.js';
 import rewrite from './rewrite.js';
+import qr from './qr.js';
 import texttools from './texttools.js';
 
 export const LIST = [
-  color, datetime, currency, calc, numberbase, unit,
-  decode, translate, jargon, summarize, rewrite, texttools
+  color, datetime, currency, coords, calc, numberbase, regex, unit,
+  code, decode, translate, jargon, summarize, rewrite, qr, texttools
 ];
 
 export function getDetector(id) {

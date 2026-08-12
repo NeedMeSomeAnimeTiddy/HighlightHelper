@@ -21,14 +21,18 @@ export const DEFAULTS = {
     color: true,
     datetime: true,
     currency: true,
+    coords: true,
     calc: true,
     numberbase: true,
+    regex: true,
     unit: true,
+    code: true,
     decode: true,
     translate: true,
     jargon: true,
     summarize: true,
     rewrite: true,
+    qr: true,
     texttools: true
   },
 

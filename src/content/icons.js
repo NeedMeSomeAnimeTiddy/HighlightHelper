@@ -74,6 +74,31 @@ const PATHS = {
   // bulleted list — key points
   list: ['M4 4.4h.02M4 8h.02M4 11.6h.02', 'M7 4.4h6M7 8h6M7 11.6h6'],
 
+  // brackets around an asterisk — regular expressions
+  regex: [
+    'M5.6 2.8H3.3v10.4h2.3M10.4 2.8h2.3v10.4h-2.3',
+    'M8 5.9v4.2M6.2 6.9l3.6 2.2M9.8 6.9 6.2 9.1'
+  ],
+  // three finder squares — QR codes
+  qr: [
+    'M2.6 2.6h3.6v3.6H2.6zM9.8 2.6h3.6v3.6H9.8zM2.6 9.8h3.6v3.6H2.6z',
+    'M9.8 9.8h1.5v1.5H9.8zM11.9 11.9h1.5v1.5h-1.5z'
+  ],
+  // map pin — coordinates
+  pin: [
+    'M8 1.9c2.3 0 4.2 1.9 4.2 4.2 0 3.1-4.2 7.9-4.2 7.9S3.8 9.2 3.8 6.1C3.8 3.8 5.7 1.9 8 1.9z',
+    'M8 7.7a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z'
+  ],
+  // angle brackets — source code
+  code: ['M5.7 4.3 2.2 8l3.5 3.7M10.3 4.3 13.8 8l-3.5 3.7', 'M9.4 2.7 6.6 13.3'],
+  // speech bubble with a plus — add comments
+  comment: [
+    'M13.4 9.2a1.5 1.5 0 0 1-1.5 1.5H6.3l-3.7 2.7V4a1.5 1.5 0 0 1 1.5-1.5h7.8A1.5 1.5 0 0 1 13.4 4z',
+    'M8 5.1v3.2M6.4 6.7h3.2'
+  ],
+  // arrow running into a wall — continue writing
+  continue: ['M2.6 8h8.3M8.1 4.9 11.2 8l-3.1 3.1', 'M13.4 3.7v8.6'],
+
   chevronRight: ['M6.2 3.6 10.6 8l-4.4 4.4'],
   chevronLeft: ['M9.8 3.6 5.4 8l4.4 4.4'],
   copy: [

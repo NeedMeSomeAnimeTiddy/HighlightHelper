@@ -10,6 +10,7 @@
 
 import { el, asyncView, actionRow } from '../kit.js';
 import { AI } from '../../common/constants.js';
+import { isCode } from './codelang.js';
 
 const MIN_CHARS = 280;
 const MAX_LEN = 12000;
@@ -22,6 +23,8 @@ export default {
   matches(text) {
     const t = text.trim();
     if (t.length < MIN_CHARS || t.length > MAX_LEN) return null;
+    // The code detector already offers a walkthrough, which is the better tool.
+    if (isCode(t)) return null;
     return { words: t.split(/\s+/).length };
   },
 

@@ -25,16 +25,25 @@ selection actually is:
 | `$50`, `30 EUR`, `£1.2bn` | The converted amount, right there in the row. Open it for the rate, its age, and other currencies | No — free rate API, cached |
 | `12 * 8 + 3`, `15% of 240`, `200 + 15%` | The answer. Parsed by hand, never `eval` | No — local |
 | `0x1F4`, `0b1011`, `0o755`, `65536` | Decimal, hex, binary, octal, and a byte-size reading | No — local |
+| `37.7749, -122.4194`, `37°46'29"N 122°25'09"W` | Decimal and DMS, with OpenStreetMap and Google Maps buttons | No — local |
+| `/^(\d{3})-(\d{4})$/gi` | A token-by-token breakdown, indented by group depth, plus what each flag does | No — local |
+| A link, an address, a wifi string | A scannable QR code | No — local |
+| A code snippet | *Explain this code*, and *Add comments* returning the same code with comments added | Yes, when you pick the row |
 | `65 mph`, `180 lbs`, `72°F`, `5'11"` | The converted measurement in the row. Open it for extras like ft+in or Kelvin | No — local |
 | A JWT, base64, `%20` escapes, JSON | Decoded or pretty-printed. JWT claims are listed, with `exp`/`iat` as real dates and an expiry warning | No — local |
 | `SLA`, `CI/CD`, `technical debt` | *Explain this* → one plain-English sentence | Yes, when you pick the row |
 | Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
 | A paragraph or more | *Summarise* and *Key points* | Yes, when you pick the row |
-| A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual, each with **Copy** and **Replace** | Yes, when you pick a tone |
+| A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual / Continue writing, each with **Copy** and **Replace** | Yes, when you pick a tone |
 | Any text | *Text tools* → word/character counts, reading time, and UPPER / lower / Title / Sentence / camel / Pascal / snake / kebab / slug | No — local |
 
-Nine of the twelve tools never touch the network. Each can be switched off
+Twelve of the sixteen tools never touch the network. Each can be switched off
 individually in settings.
+
+*Continue writing* is the one rewrite tone that appends rather than replaces, so
+its result shows the whole passage with the original dimmed and the new text in
+normal weight — and **Copy** and **Replace** take both, because replacing your
+paragraph with only its ending would be wrong.
 
 Free tools resolve up front, so the menu often answers before you click anything. Anything
 that costs money waits for you to pick its row — that click is the consent.
@@ -153,17 +162,21 @@ src/
     main.js                   selection capture, shadow host, view stack, replace
     kit.js                    el(), menu(), and the shared UI pieces
     icons.js                  monochrome 16px SVG glyphs
+    qr.js                     QR encoder — byte mode, level M, versions 1-20
     panel.css                 adopted into the shadow root
     detectors/
       index.js                registry + detect()
-      color.js  datetime.js  currency.js  calc.js  numberbase.js
-      unit.js  decode.js  translate.js  jargon.js  summarize.js
-      rewrite.js  texttools.js
+      color.js  datetime.js  currency.js  coords.js  calc.js
+      numberbase.js  regex.js  unit.js  code.js  decode.js
+      translate.js  jargon.js  summarize.js  rewrite.js  qr.js
+      texttools.js
       langdetect.js           small script/stopword language guesser
+      codelang.js             "is this code, and which language?"
   options/                    options page
   action/                     toolbar popup
 test/
   detectors.test.js           node test/detectors.test.js
+  qr-roundtrip.js             independent QR reader, used by the tests
 ```
 
 **Why the loader indirection.** Manifest content scripts can't be declared as ES modules, so
@@ -194,10 +207,25 @@ earlier version added the visible class in a rAF callback, which meant the entir
 rendered at `opacity: 0` until a frame arrived. Revealing the UI must be what happens when
 nothing runs, not something that has to run.
 
-**Why detectors have a "is this prose?" gate.** `translate`, `rewrite` and `texttools` match
-on shape rather than on a pattern, so without `common/text.js` they cheerfully offer to
-translate a hex colour and rewrite a JWT. A selection like `#3f8ae0` already has a detector
-that owns it; a second, useless row is pure noise.
+**Why detectors have a "is this prose?" gate.** `translate`, `rewrite`, `summarize`,
+`texttools` and `qr` match on shape rather than on a pattern, so without `common/text.js`
+and `detectors/codelang.js` they cheerfully offer to translate a hex colour, rewrite a JWT
+and QR-encode a whole paragraph. A selection like `#3f8ae0` already has a detector that owns
+it; a second, useless row is pure noise. "Fix spelling & grammar" pointed at a function body
+is worse than noise, which is why `rewrite` refuses anything `isCode()` recognises.
+
+**How the QR encoder is checked.** It is written from scratch, so `test/qr-roundtrip.js` is a
+separate reader that decodes a generated matrix back to its original text and verifies the
+Reed–Solomon syndromes. The block tables are cross-checked against an independent
+total-codeword table by the identity
+
+    group1·data1 + group2·data2 + ec·blocks === totalCodewords[version]
+
+which is what catches a transposed digit — the failure mode where codes still look right but
+only some scanners read them. The generator polynomial and Reed–Solomon output are also
+pinned to the published worked example. What none of that proves is that the *layout* matches
+the specification: a self-consistently wrong zig-zag would still round-trip. Scanning one
+with a phone is the check that closes that gap.
 
 **Where the network lives.** Only the service worker. Content scripts send messages; they
 never hold the API key and never call `fetch` against DeepSeek.
@@ -278,10 +306,10 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-148 assertions over number parsing, every detector's `matches()`, menu row construction, and
-ordering — including a block that pins down what the catch-all detectors must *not* claim.
-No framework, no dependencies. `package.json` exists only so Node treats the source as ES
-modules — Chrome never reads it.
+210 assertions over number parsing, every detector's `matches()`, menu row construction,
+ordering, the QR encoder and its round trip — including a block that pins down what the
+catch-all detectors must *not* claim. No framework, no dependencies. `package.json` exists
+only so Node treats the source as ES modules — Chrome never reads it.
 
 The tests cover `matches()` and `items()`, which is where the fiddly logic lives; `open()` is
 lazy, so rows can be inspected without a DOM. The rendering and selection machinery is not
@@ -293,15 +321,11 @@ Sketched and deliberately left out, roughly in order of how useful they'd be:
 
 | Idea | Note |
 | --- | --- |
-| **Coordinates** — `37.7749, -122.4194` → DMS, and a map link | Opening a map is an outward action; needs a decision on which service |
-| **Regex explainer** — `/^\d{3}-\d{4}$/` in English | Real niche value; could be local for simple patterns, AI for the rest |
-| **Code explainer** — detect a code-shaped selection, explain or comment it | Needs a language guesser to be worth anything |
-| **Continue writing / expand** — the inverse of *Shorter* | One more tone row; trivial to add |
 | **Extract to table** — turn pasted rows into a Markdown table | AI; good for pasted spreadsheet output |
-| **QR code** — for sending a URL to your phone | Needs a QR encoder written from scratch, since no dependencies |
 | **Hash** — SHA-256 of the selection via SubtleCrypto | Easy, but narrow |
 | **Time zone converter** — "3pm EST" in your zone | Parsing zone abbreviations is genuinely ambiguous (CST is three zones) |
 | **HTML entity decode** — `&amp;#8212;` | Fits `decode.js` as another branch |
+| **Convert code to another language** | Sits naturally next to *Explain this code* |
 | **Roman numerals**, **IBAN/phone formatting** | Cute, rarely wanted |
 
 ## Known limitations
@@ -321,6 +345,19 @@ Sketched and deliberately left out, roughly in order of how useful they'd be:
 - **Dates are only parsed as epoch values or ISO 8601.** `Date.parse` on arbitrary prose is
   lenient and inconsistent between engines, so "next friday" or a bare "12/03" would produce a
   confident, wrong answer rather than no answer.
+- **QR codes are byte mode, level M, versions 1–20** — a 666-byte ceiling. Numeric and
+  alphanumeric modes would pack more in but only matter past that limit. The code is always
+  rendered dark-on-light, ignoring dark mode, because an inverted QR defeats many scanners.
+- **A bare regex needs a real construct to be recognised** — `\d`, a character class, a
+  counted quantifier, a lookaround, an anchor, or alternation inside a group. `(hi)` on its own
+  is far more likely to be prose in brackets, so it is left alone. Wrap it in `/…/` to be
+  unambiguous.
+- **The code language guess is a keyword heuristic.** It is used only to hint the prompt and
+  to label the row, never to change behaviour; a wrong guess costs a word in a prompt the model
+  is free to ignore.
+- **Map buttons open a third-party site** with the coordinates in the URL. They are explicit
+  buttons rather than anything automatic, and OpenStreetMap is listed first because it needs no
+  account.
 - **Replace can't reach every editor.** It uses the native value setter for inputs/textareas
   (so React-style controlled components see the change) and `execCommand('insertText')` for
   contenteditable. Editors with their own document model — Google Docs, some CodeMirror

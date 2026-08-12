@@ -22,7 +22,10 @@ export const AI = {
   FORMAL: 'formal',
   CASUAL: 'casual',
   SUMMARIZE: 'summarize',
-  KEYPOINTS: 'keypoints'
+  KEYPOINTS: 'keypoints',
+  CONTINUE: 'continue',
+  EXPLAIN_CODE: 'explain-code',
+  COMMENT_CODE: 'comment-code'
 };
 
 /** Sentinel error codes the UI reacts to specially. */
