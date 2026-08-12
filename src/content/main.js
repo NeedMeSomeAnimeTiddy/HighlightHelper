@@ -55,8 +55,11 @@ async function ensureUi() {
   const host = document.createElement('div');
   host.setAttribute('data-highlight-helper', '');
   // `all: initial` first, then the properties we actually need — later wins.
+  // These are inline so no page stylesheet can override them. The z-index sits
+  // on the host so the whole UI is one stacking context at the document root.
   host.style.cssText =
-    'all: initial; position: absolute; top: 0; left: 0; width: 0; height: 0;';
+    'all: initial; position: absolute; top: 0; left: 0; width: 0; height: 0; ' +
+    'z-index: 2147483647;';
 
   const shadow = host.attachShadow({ mode: 'open' });
 
@@ -377,6 +380,7 @@ function hide() {
 
 async function showIcon(selection) {
   await ensureUi();
+  if (mode === 'panel') return; // a panel opened while we were waiting
   current = selection;
   mode = 'icon';
 
@@ -401,6 +405,8 @@ async function showIcon(selection) {
 async function openPanel({ preselect = null, forcedLanguage = null, forceIds = [] } = {}) {
   if (!current) return;
   await ensureUi();
+  // ensureUi awaits the stylesheet on first use; the selection may be gone by now.
+  if (!current) return;
   mode = 'panel';
 
   const hits = detect(current.text, settings);
