@@ -1,14 +1,15 @@
 /**
- * Translation detector.
+ * Translation.
  *
- * Always available (translating your own language into another is a real use
- * case), but it ranks itself near the top of the tab list when the local
- * guesser thinks the selection is in a language you don't read.
+ * Always offered — translating *out of* your own language is a real use — but
+ * it ranks to the top of the menu when the local guesser thinks the selection
+ * is in a language you don't read.
  *
- * Nothing is sent anywhere until you press Translate.
+ * Picking the row translates into your default language straight away; the
+ * language picker sits next to Copy/Replace for switching afterwards.
  */
 
-import { el, btn, replaceContent, resultBlock, spinner } from '../kit.js';
+import { el, replaceContent, spinner, actionRow } from '../kit.js';
 import { LANGUAGES, languageName } from '../../common/languages.js';
 import { detectLanguage, baseTag } from './langdetect.js';
 import { AI } from '../../common/constants.js';
@@ -35,56 +36,60 @@ export default {
       confidence: guess.confidence,
       foreign,
       // Confidently foreign text jumps ahead of unit/currency; otherwise the
-      // tab sits behind the specific detectors.
+      // row sits behind the specific detectors.
       priority: foreign ? 5 : 65
     };
   },
 
-  render({ text, match, settings, api }) {
-    const box = el('div', {});
+  items({ text, match, settings, api }) {
+    const initial = api.forcedLanguage || settings.language;
 
-    // Pre-selected target language, overridable from the dropdown.
-    let target = api.forcedLanguage || settings.language;
-
-    const picker = el('select', { class: 'hh-select' },
-      ...LANGUAGES.map(([code, name]) =>
-        el('option', { value: code, selected: code === target }, name)
-      )
-    );
-    picker.addEventListener('change', () => { target = picker.value; });
-
-    const goBtn = btn('Translate', () => run(), { variant: 'hh-primary' });
-
-    const controls = el('div', { class: 'hh-row' }, picker, goBtn);
-
-    const intro = match.foreign && match.detected
-      ? el('p', { class: 'hh-sub', text: `Looks like ${languageName(match.detected)}.` })
-      : null;
-
-    const preview = el('blockquote', { class: 'hh-quote', text });
-
-    function idle() {
-      replaceContent(box, ...[intro, preview, controls].filter(Boolean));
-    }
-
-    async function run() {
-      replaceContent(box, spinner(`Translating into ${languageName(target)}…`));
-      try {
-        const res = await api.ai(AI.TRANSLATE, text, { language: target });
-        const out = el('div', {},
-          resultBlock(res.text, api, { label: `${languageName(target)}${res.cached ? ' · cached' : ''}` })
-        );
-        out.append(el('div', { class: 'hh-row' }, btn('Change language', idle, { variant: 'hh-ghost' })));
-        replaceContent(box, out);
-      } catch (err) {
-        replaceContent(box, api.errorFor(err, run));
-      }
-    }
-
-    idle();
-    // The right-click "Translate to…" menu opens straight into the result.
-    if (api.forcedLanguage) run();
-
-    return box;
+    return [{
+      key: 'translate',
+      icon: 'translate',
+      label: `Translate to ${languageName(initial)}`,
+      detailTitle: match.foreign && match.detected
+        ? `From ${languageName(match.detected)}`
+        : 'Translation',
+      open: (ctx) => view(text, initial, ctx)
+    }];
   }
 };
+
+function view(text, initialLanguage, api) {
+  const box = el('div', { class: 'hh-detail' });
+  let target = initialLanguage;
+
+  const picker = el('select', {
+    class: 'hh-select',
+    'aria-label': 'Translate into'
+  }, ...LANGUAGES.map(([code, name]) =>
+    el('option', { value: code, selected: code === target }, name)
+  ));
+
+  picker.addEventListener('change', () => {
+    target = picker.value;
+    run();
+  });
+
+  function run() {
+    replaceContent(box, spinner(`Translating into ${languageName(target)}…`));
+    api.ai(AI.TRANSLATE, text, { language: target }).then(
+      (res) => {
+        picker.value = target;
+        replaceContent(box,
+          el('div', {
+            class: 'hh-label',
+            text: `${languageName(target)}${res.cached ? ' · cached' : ''}`
+          }),
+          el('div', { class: 'hh-text', text: res.text }),
+          actionRow(res.text, api, [picker])
+        );
+      },
+      (err) => replaceContent(box, api.errorFor(err, run))
+    );
+  }
+
+  run();
+  return box;
+}

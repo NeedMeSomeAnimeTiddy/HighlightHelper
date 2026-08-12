@@ -5,10 +5,10 @@
  *
  *   {
  *     id:       'currency',            // stable key, also the settings toggle
- *     title:    'Currency',            // tab label
+ *     title:    'Currency',            // human name, used in options
  *     priority: 10,                    // lower = more specific, sorted first
  *     matches(text, settings)          // -> falsy | match object
- *     render(ctx)                      // -> HTMLElement (sync; may fill async)
+ *     items(ctx)                       // -> menu rows for the matched text
  *   }
  *
  * `matches` must be cheap and side-effect free — it runs on every selection.
@@ -16,10 +16,23 @@
  * translate detector uses this to rank itself higher when it is confident the
  * text is foreign).
  *
- * `render` receives:
- *   { text, match, settings, api }
- * and returns an element immediately. Anything slow (network, AI) is the
- * detector's own job to run with a spinner — see kit.withLoading.
+ * `items` receives { text, match, settings, api } and returns menu rows:
+ *
+ *   {
+ *     key,                  // unique; lets the panel open a row directly
+ *     icon,                 // glyph name from ../icons.js
+ *     label,                // row text
+ *     value,                // optional right-hand result: string | Promise
+ *     detailTitle,          // header of the drilled-in view
+ *     open(api) -> Node     // omit entirely for a static, unclickable row
+ *   }
+ *
+ * `value` may be a Promise when the answer is free but not instant (currency
+ * waits on cached rates); the row shows a pulse until it resolves. Anything
+ * that costs money must wait for `open` — that click is the user's consent.
+ *
+ * `open` returns an element synchronously. Use kit.asyncView for the
+ * spinner-then-result-or-retry shape, and kit.menu to nest a submenu.
  *
  * Adding a detector = write the file, import it, add it to LIST, and add its
  * id to DEFAULTS.detectors in src/common/settings.js.

@@ -11,7 +11,7 @@
  * `imperialFlavor` decides whether gallons/pints/fluid ounces are US or UK.
  */
 
-import { el, replaceContent, note } from '../kit.js';
+import { el, replaceContent } from '../kit.js';
 import { NUMBER_SRC, parseNumber, formatNumber } from '../../common/numbers.js';
 
 const MAX_LEN = 240;
@@ -306,15 +306,12 @@ function bestUnit(baseValue, units) {
 
 function convertFuel(match, settings) {
   const c = settings.imperialFlavor === 'uk' ? 282.480936 : 235.214583;
-  if (match.from === 'mpg') {
-    return {
-      toLabel: `${formatNumber(c / match.value)} L/100km`,
-      sub: settings.imperialFlavor === 'uk' ? 'Using UK gallons' : 'Using US gallons'
-    };
-  }
+  const toUnit = match.from === 'mpg' ? 'L/100km' : 'mpg';
   return {
-    toLabel: `${formatNumber(c / match.value)} mpg`,
-    sub: settings.imperialFlavor === 'uk' ? 'UK mpg' : 'US mpg'
+    toUnit,
+    toLabel: `${formatNumber(c / match.value)} ${toUnit}`,
+    sub: settings.imperialFlavor === 'uk' ? 'Using UK gallons' : 'Using US gallons',
+    extras: []
   };
 }
 
@@ -337,6 +334,7 @@ function convertTemp(match, settings) {
   }
 
   return {
+    toUnit: `°${target}`,
     toLabel: `${formatNumber(value, { maxDecimals: 1 })} °${target}`,
     extras
   };
@@ -358,7 +356,11 @@ function convert(match, settings) {
   if (!unit) return null;
 
   const value = match.base / unit.f;
-  const out = { toLabel: `${formatNumber(value)} ${unit.sym}`, extras: [] };
+  const out = {
+    toUnit: unit.sym,
+    toLabel: `${formatNumber(value)} ${unit.sym}`,
+    extras: []
+  };
 
   // Human-scale heights read better as feet + inches.
   if (match.dim === 'length' && targetSys === 'imperial' && match.base < 3 && match.base > 0.3) {
@@ -395,34 +397,46 @@ export default {
     return { ...found, result };
   },
 
-  render({ match }) {
-    const box = el('div', {});
-    const { result } = match;
-
-    const main = el('div', { class: 'hh-conv' },
-      el('span', { class: 'hh-from', text: match.fromLabel }),
-      el('span', { class: 'hh-arrow', text: '→' }),
-      el('span', { text: result.toLabel })
-    );
-
-    const children = [main];
-    if (result.sub) children.push(el('p', { class: 'hh-sub', text: result.sub }));
-
-    if (result.extras?.length) {
-      children.push(
-        el('div', { class: 'hh-extra' },
-          ...result.extras.map((x) =>
-            el('div', {}, `${x.label} `, el('span', { text: x.value }))
-          )
-        )
-      );
-    }
-
-    if (match.raw && match.raw.toLowerCase() !== match.fromLabel.toLowerCase()) {
-      children.push(note(`Read from "${match.raw}"`));
-    }
-
-    replaceContent(box, ...children);
-    return box;
+  items({ match }) {
+    return [{
+      key: 'unit',
+      icon: 'unit',
+      label: `Convert to ${match.result.toUnit}`,
+      value: match.result.toLabel,
+      detailTitle: 'Unit conversion',
+      open: () => detailView(match)
+    }];
   }
 };
+
+function detailView(match) {
+  const { result } = match;
+  const box = el('div', { class: 'hh-detail' });
+
+  const headline = el('div', { class: 'hh-headline' },
+    el('span', { class: 'hh-from', text: match.fromLabel }),
+    el('span', { class: 'hh-arrow', text: '→' }),
+    el('span', { text: result.toLabel })
+  );
+
+  const parts = [headline];
+  if (result.sub) parts.push(el('p', { class: 'hh-sub', text: result.sub }));
+
+  if (result.extras?.length) {
+    parts.push(
+      el('div', { class: 'hh-facts' },
+        ...result.extras.map((x) => el('div', { class: 'hh-fact' },
+          el('em', { text: x.label }),
+          el('span', { text: x.value })
+        ))
+      )
+    );
+  }
+
+  if (match.raw && match.raw.toLowerCase() !== match.fromLabel.toLowerCase()) {
+    parts.push(el('p', { class: 'hh-sub', text: `Read from “${match.raw}”` }));
+  }
+
+  replaceContent(box, ...parts);
+  return box;
+}

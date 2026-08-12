@@ -2,11 +2,11 @@
  * Currency detector — finds an amount like "$50", "50 USD", "€1.234,56",
  * "£1.2bn" in the selection and converts it to the user's target currency.
  *
- * Rates come from the background worker (cached), so a repeat selection is a
- * storage read, not a network call.
+ * Free, so the answer resolves straight into the menu row. Opening the row
+ * shows the rate, when it was published, and a couple of other currencies.
  */
 
-import { el, spinner, replaceContent, errorBox, note } from '../kit.js';
+import { el, asyncView, replaceContent, note } from '../kit.js';
 import {
   CURRENCY_CODES,
   CURRENCY_SYMBOLS,
@@ -81,14 +81,20 @@ function findAmount(text) {
 
 /** Sub-conversions worth showing alongside the main one. */
 function extraTargets(from, to) {
-  const pool = ['USD', 'EUR', 'GBP', 'JPY'];
-  return pool.filter((c) => c !== from && c !== to).slice(0, 2);
+  return ['USD', 'EUR', 'GBP', 'JPY'].filter((c) => c !== from && c !== to).slice(0, 2);
 }
 
 function amountLine(value, code) {
-  const sym = DISPLAY_SYMBOL[code];
-  const num = formatMoney(value, code);
-  return sym && sym.length <= 3 ? `${sym}${num}` : `${num} ${code}`;
+  const symbol = DISPLAY_SYMBOL[code];
+  const number = formatMoney(value, code);
+  return symbol && symbol.length <= 3 ? `${symbol}${number}` : `${number} ${code}`;
+}
+
+/** Asks the worker for rates and pulls out the one we need. */
+async function fetchRates(api, base) {
+  const res = await api.send({ type: MSG.RATES, base });
+  if (!res?.ok) throw new Error(res?.error || 'Could not reach the rate service');
+  return res;
 }
 
 export default {
@@ -108,68 +114,70 @@ export default {
     };
   },
 
-  render({ match, api }) {
-    const box = el('div', {});
-
+  items({ match, api }) {
     if (match.sameCurrency) {
-      replaceContent(
-        box,
-        el('div', { class: 'hh-conv' }, amountLine(match.value, match.code)),
-        note(`Already in ${currencyName(match.code)}, your default currency.`)
-      );
-      return box;
+      // Nothing to convert, but confirming what we read is still useful.
+      return [{
+        key: 'currency',
+        icon: 'currency',
+        label: `Already in ${match.code}`,
+        value: amountLine(match.value, match.code)
+      }];
     }
 
-    replaceContent(box, spinner('Fetching rates…'));
-
-    const load = async () => {
-      const res = await api.send({ type: MSG.RATES, base: match.code });
-      if (!res?.ok) throw new Error(res?.error || 'Could not reach the rate service');
-
+    // The worker caches rates, so the row's lookup and the detail view's
+    // lookup cost one network request between them.
+    const inline = fetchRates(api, match.code).then((res) => {
       const rate = res.rates[match.target];
-      if (!rate) {
-        replaceContent(
-          box,
-          note(`No published rate for ${match.target} against ${match.code}.`, 'hh-warn')
-        );
-        return;
-      }
+      if (!rate) throw new Error('no rate');
+      return amountLine(match.value * rate, match.target);
+    });
 
-      const converted = match.value * rate;
-      const main = el('div', { class: 'hh-conv' },
-        el('span', { class: 'hh-from', text: amountLine(match.value, match.code) }),
-        el('span', { class: 'hh-arrow', text: '→' }),
-        el('span', { text: amountLine(converted, match.target) })
-      );
-
-      const when = new Date(res.updated);
-      const sub = el('p', { class: 'hh-sub' },
-        `1 ${match.code} = ${formatMoney(rate, match.target)} ${match.target} · ` +
-        (res.stale ? 'cached (offline)' : `updated ${when.toLocaleDateString()}`)
-      );
-
-      const extras = extraTargets(match.code, match.target)
-        .filter((c) => res.rates[c])
-        .map((c) =>
-          el('div', {}, `${c} `, el('span', {
-            text: formatMoney(match.value * res.rates[c], c)
-          }))
-        );
-
-      replaceContent(
-        box,
-        main,
-        sub,
-        extras.length ? el('div', { class: 'hh-extra' }, ...extras) : null
-      );
-    };
-
-    const attempt = () =>
-      load().catch((err) =>
-        replaceContent(box, errorBox(String(err.message || err), { onRetry: attempt }))
-      );
-
-    attempt();
-    return box;
+    return [{
+      key: 'currency',
+      icon: 'currency',
+      label: `Convert to ${match.target}`,
+      value: inline,
+      detailTitle: `${match.code} → ${match.target}`,
+      open: (ctx) => detailView(match, ctx)
+    }];
   }
 };
+
+function detailView(match, api) {
+  return asyncView('Fetching rates…', async () => {
+    const res = await fetchRates(api, match.code);
+    const rate = res.rates[match.target];
+
+    if (!rate) {
+      return note(
+        `No published rate for ${match.target} against ${match.code}.`,
+        'hh-warn'
+      );
+    }
+
+    const box = el('div', {});
+    const headline = el('div', { class: 'hh-headline' },
+      el('span', { class: 'hh-from', text: amountLine(match.value, match.code) }),
+      el('span', { class: 'hh-arrow', text: '→' }),
+      el('span', { text: amountLine(match.value * rate, match.target) })
+    );
+
+    const when = new Date(res.updated);
+    const sub = el('p', { class: 'hh-sub' },
+      `1 ${match.code} = ${formatMoney(rate, match.target)} ${match.target} · ` +
+      (res.stale ? 'cached, offline' : `updated ${when.toLocaleDateString()}`)
+    );
+
+    const facts = extraTargets(match.code, match.target)
+      .filter((code) => res.rates[code])
+      .map((code) => el('div', { class: 'hh-fact' },
+        el('em', { text: currencyName(code) }),
+        el('span', { text: amountLine(match.value * res.rates[code], code) })
+      ));
+
+    replaceContent(box, headline, sub,
+      facts.length ? el('div', { class: 'hh-facts' }, ...facts) : null);
+    return box;
+  }, (err, retry) => api.errorFor(err, retry));
+}

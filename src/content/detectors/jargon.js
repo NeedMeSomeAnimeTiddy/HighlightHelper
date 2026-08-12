@@ -2,15 +2,18 @@
  * Jargon / acronym explainer.
  *
  * Fires on short selections: an acronym (SLA, CI/CD, GDPR) or a phrase of up
- * to four words. The page title goes along as context so "PR" on a GitHub
- * page and "PR" on a marketing blog get different answers.
+ * to four words. The page title goes along as context so "PR" on a GitHub page
+ * and "PR" on a marketing blog get different answers.
+ *
+ * Costs a DeepSeek call, so nothing happens until the row is picked.
  */
 
-import { el, btn, replaceContent, resultBlock, spinner } from '../kit.js';
+import { el, asyncView, copyButton } from '../kit.js';
 import { AI } from '../../common/constants.js';
 
 const MAX_CHARS = 48;
 const MAX_WORDS = 4;
+const LABEL_CHARS = 22;
 
 /** SLA, CI/CD, IPv6, 401k — capitals with at least two letters. */
 const RE_ACRONYM = /^[A-Z][A-Za-z0-9]*(?:[/\-.][A-Za-z0-9]+)*$/;
@@ -21,6 +24,10 @@ function isAcronym(text) {
   if (letters.length < 2) return false;
   const caps = text.replace(/[^A-Z]/g, '').length;
   return caps >= 2 && caps / letters.length >= 0.6;
+}
+
+function short(text) {
+  return text.length > LABEL_CHARS ? `${text.slice(0, LABEL_CHARS - 1)}…` : text;
 }
 
 export default {
@@ -43,47 +50,22 @@ export default {
     return { term: t, acronym, priority: acronym ? 15 : 40 };
   },
 
-  render({ match, api }) {
-    const box = el('div', {});
-
-    const goBtn = btn(
-      match.acronym ? 'What does it stand for?' : 'Explain this',
-      () => run(),
-      { variant: 'hh-primary' }
-    );
-
-    function idle() {
-      replaceContent(
-        box,
-        el('div', { class: 'hh-label', text: match.acronym ? 'Acronym' : 'Term' }),
-        el('div', { class: 'hh-text', text: match.term }),
-        el('div', { class: 'hh-row' }, goBtn)
-      );
-    }
-
-    async function run() {
-      replaceContent(box, spinner('Looking it up…'));
-      try {
-        const res = await api.ai(AI.EXPLAIN, match.term, {
-          pageContext: api.context.title
+  items({ match }) {
+    return [{
+      key: 'explain',
+      icon: 'explain',
+      label: match.acronym ? `Expand “${short(match.term)}”` : 'Explain this',
+      detailTitle: short(match.term),
+      open: (ctx) => asyncView('Looking it up…', async () => {
+        const res = await ctx.ai(AI.EXPLAIN, match.term, {
+          pageContext: ctx.context.title
         });
-        const copyBtn = btn('Copy', async () => {
-          const ok = await api.copy(res.text);
-          copyBtn.textContent = ok ? 'Copied' : 'Copy failed';
-          setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1400);
-        });
-        replaceContent(
-          box,
-          el('div', { class: 'hh-label', text: match.term }),
+        return el('div', {},
           el('div', { class: 'hh-text', text: res.text }),
-          el('div', { class: 'hh-row' }, copyBtn)
+          el('div', { class: 'hh-row' }, copyButton(res.text, ctx)),
+          res.cached ? el('p', { class: 'hh-sub', text: 'From cache' }) : null
         );
-      } catch (err) {
-        replaceContent(box, api.errorFor(err, run));
-      }
-    }
-
-    idle();
-    return box;
+      }, (err, retry) => ctx.errorFor(err, retry))
+    }];
   }
 };

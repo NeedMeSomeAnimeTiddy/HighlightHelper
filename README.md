@@ -2,21 +2,35 @@
 
 A Chrome extension (Manifest V3) that turns any text selection into something useful.
 
-Select text on a page and a small icon appears next to it. Click the icon and a compact
-panel opens with whatever applies to what you selected:
+Select text on a page and a small icon appears next to it. Click the icon and you get a
+menu of what you can do with that text — like a right-click menu, but built from what the
+selection actually is:
 
-| Selection | What you get | Costs an API call? |
+```
+╭──────────────────────────────────╮
+│  “The trip costs $50 for 5 miles” │
+├──────────────────────────────────┤
+│  ⇄   Convert to EUR       €46.10 │   ← free, already answered
+│  ⇉   Convert to km       8.05 km │   ← free, already answered
+│  ✎   Rewrite            13 words ›│
+│  ⌘   Translate to English        ›│
+╰──────────────────────────────────╯
+       Highlight Helper    Settings
+```
+
+| Selection | Menu offers | Costs an API call? |
 | --- | --- | --- |
-| `$50`, `30 EUR`, `£1.2bn` | Converted into your currency, with the rate and its age | No — free rate API, cached |
-| `65 mph`, `180 lbs`, `72°F`, `5'11"` | Converted to the other unit system | No — all local |
-| `SLA`, `CI/CD`, `technical debt` | One-line plain-English explanation | Yes, on click |
-| Text in another language | Translation into your language | Yes, on click |
-| A sentence or longer | Fix grammar / Shorter / Formal / Casual, with **Copy** and **Replace** | Yes, on click |
+| `$50`, `30 EUR`, `£1.2bn` | The converted amount, right there in the row. Open it for the rate, its age, and other currencies | No — free rate API, cached |
+| `65 mph`, `180 lbs`, `72°F`, `5'11"` | The converted measurement in the row. Open it for extras like ft+in or Kelvin | No — all local |
+| `SLA`, `CI/CD`, `technical debt` | *Explain this* → one plain-English sentence | Yes, when you pick the row |
+| Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
+| A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual, each with **Copy** and **Replace** | Yes, when you pick a tone |
+
+Free tools resolve up front, so the menu often answers before you click anything. Anything
+that costs money waits for you to pick its row — that click is the consent.
 
 You can also right-click any selection and pick **Translate to…** for a one-off translation
-into a language other than your default.
-
-Nothing is ever sent to an API until you click a button.
+into a language other than your default; that opens the panel straight at the result.
 
 ---
 
@@ -65,13 +79,26 @@ Everything below lives in `chrome.storage.sync` except the API key.
 
 ## Interaction
 
-- Select text → small icon appears at the end of the selection
-- Click the icon → panel opens, with a tab per applicable tool
-- <kbd>Esc</kbd> or a click anywhere outside dismisses the panel
-- <kbd>←</kbd> / <kbd>→</kbd> move between tabs when a tab has focus
-- **Replace** writes the result back over your selection. It only works when the selection
-  came from a text field, textarea, or contenteditable — ordinary page text isn't editable,
-  and the button is disabled with a tooltip explaining why
+- Select text → a small icon appears at the end of the selection
+- Click the icon → the menu opens, one row per applicable tool
+- Pick a row → it **drills in** within the same panel, with a back arrow in the header.
+  The panel animates to each view's height rather than jumping, and its width never changes
+- **Rewrite** drills into its four tones rather than using a hover flyout — a flyout near a
+  screen edge has to flip sides and is awkward on touch
+
+| Key | Does |
+| --- | --- |
+| <kbd>↑</kbd> <kbd>↓</kbd> | Move through the menu rows |
+| <kbd>Enter</kbd> | Open the highlighted row |
+| <kbd>Esc</kbd> | Go back one level, or close at the top level |
+| <kbd>Backspace</kbd> / <kbd>←</kbd> | Go back one level |
+
+Keys are only captured when you aren't typing — if the selection came from a text field,
+that field keeps its arrow keys and only <kbd>Esc</kbd> is intercepted.
+
+**Replace** writes the result back over your selection. It only works when the selection came
+from a text field, textarea, or contenteditable — ordinary page text isn't editable, and the
+button is disabled with a tooltip explaining why.
 
 ## Cost control
 
@@ -112,8 +139,9 @@ src/
     cache.js                  TTL + LRU cache over chrome.storage.local
   content/
     loader.js                 classic content script; imports main.js as a module
-    main.js                   selection capture, shadow-DOM host, panel, replace
-    kit.js                    el() and the shared UI pieces
+    main.js                   selection capture, shadow host, view stack, replace
+    kit.js                    el(), menu(), and the shared UI pieces
+    icons.js                  monochrome 16px SVG glyphs
     panel.css                 adopted into the shadow root
     detectors/
       index.js                registry + detect()
@@ -129,37 +157,58 @@ test/
 `loader.js` is a one-line classic script that does `import(chrome.runtime.getURL(...))`. That
 keeps the source as small importable modules with no bundler anywhere in the loop.
 
-**Why shadow DOM.** The panel is attached to a shadow root on `<html>` with `all: initial`,
-so host page CSS can't reach in and the panel's CSS can't leak out. `panel.css` is a real
-stylesheet fetched once and adopted via `adoptedStyleSheets`.
+**Why shadow DOM.** The panel is attached to a shadow root on `<html>` with `all: initial`
+set inline, so page rules like `div { color: red }` can't reach in and the panel's CSS can't
+leak out. `panel.css` is a real stylesheet fetched once and adopted via `adoptedStyleSheets`.
+
+One consequence is worth knowing before editing the CSS: an inline `all: initial` outranks
+any `:host` rule, so `:host { color: … }` loses and every descendant inherits `initial` —
+black text, invisible on the dark surface. Custom properties are the exception, since `all`
+never resets them. So the `--hh-*` tokens live on `:host`, and every *inherited* text
+property is set on `.hh-layer` instead, which page CSS can't reach anyway.
+
+**Why the panel's height rests on `auto`.** Results arrive at unpredictable times, and an
+explicit height that failed to update would clip them. The height is pinned only for the
+150ms of a view transition and released by a timer — not `transitionend`, which never fires
+under `prefers-reduced-motion`. The `ResizeObserver` is purely positional, so the panel can
+flip above the selection if a result grows past the bottom of the viewport; if it never
+fires, nothing is clipped.
 
 **Where the network lives.** Only the service worker. Content scripts send messages; they
 never hold the API key and never call `fetch` against DeepSeek.
 
 ### Adding a detector
 
-A detector is a plain object with two functions:
+A detector decides whether it applies, then contributes menu rows:
 
 ```js
 // src/content/detectors/mything.js
-import { el, btn, replaceContent } from '../kit.js';
+import { el, asyncView } from '../kit.js';
 
 export default {
   id: 'mything',        // stable key; also the settings toggle
-  title: 'My Thing',    // tab label
-  priority: 35,         // lower = checked and shown first
+  title: 'My Thing',    // human name, shown in options
+  priority: 35,         // lower = ranked earlier in the menu
 
   // Cheap and side-effect free — this runs on every selection.
-  // Return falsy for no match, or an object describing the match.
-  // The object may carry its own `priority` to override the default.
+  // Return falsy for no match, or an object describing the match. It may
+  // carry its own `priority` to override the default for this one hit.
   matches(text, settings) {
-    return text.includes('🦆') ? { count: 1 } : null;
+    const ducks = (text.match(/🦆/g) || []).length;
+    return ducks ? { ducks } : null;
   },
 
-  // Returns an element synchronously. Anything slow is your own job to run
-  // with a spinner — see kit.withLoading and the currency detector.
-  render({ text, match, settings, api }) {
-    return el('div', { text: `Found ${match.count} duck(s)` });
+  // Returns the rows this detector wants in the menu.
+  items({ text, match, settings, api }) {
+    return [{
+      key: 'mything',                 // unique; lets the panel open it directly
+      icon: 'explain',                // glyph name from ../icons.js
+      label: 'Count the ducks',
+      value: String(match.ducks),     // string | Promise<string> | omitted
+      detailTitle: 'Ducks',
+      open: (ctx) => el('div', { class: 'hh-detail' },
+        el('div', { class: 'hh-text', text: `There are ${match.ducks} of them.` }))
+    }];
   }
 };
 ```
@@ -170,7 +219,15 @@ Then:
 2. Add `mything: true` to `DEFAULTS.detectors` in `src/common/settings.js`
 3. Optionally add a one-line blurb to `DETECTOR_BLURB` in `src/options/options.js`
 
-The `api` object passed to `render` gives you:
+**Row rules.** `value` may be a `Promise` when the answer is free but not instant — the row
+shows a pulse until it resolves, and a rejection turns into a warning glyph. Anything that
+costs money must wait for `open`. Omit `open` entirely for a static, unclickable row.
+
+**Building views.** `open` returns an element synchronously. Use `kit.asyncView(label,
+producer, onError)` for the spinner → result → retry shape, and `kit.menu(items, api)` to
+nest a submenu — that's all the rewriter's tone list is.
+
+The `api` object gives you:
 
 | | |
 | --- | --- |
@@ -180,8 +237,12 @@ The `api` object passed to `render` gives you:
 | `api.replace(text)` | write back over the selection; returns a boolean |
 | `api.canReplace` | whether the selection is editable at all |
 | `api.errorFor(err, retry)` | friendly error element, with a Settings link for key problems |
+| `api.push(title, node)` / `api.pop()` | drive the view stack yourself |
 | `api.context` | `{ title, host, url }` of the page |
 | `api.settings` | current settings |
+
+Useful pieces from `kit.js`: `resultView`, `actionRow`, `copyButton`, `quote`, `spinner`,
+`note`, `errorBox`, `btn`, `el`, `glyph`.
 
 New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` and a name in
 `AI` in `src/common/constants.js`.
@@ -192,9 +253,13 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-59 assertions over number parsing, currency matching, unit conversion, acronym detection,
-language guessing, and tab ordering. No framework, no dependencies. `package.json` exists
-only so Node treats the source as ES modules — Chrome never reads it.
+74 assertions over number parsing, currency matching, unit conversion, acronym detection,
+language guessing, menu row construction, and ordering. No framework, no dependencies.
+`package.json` exists only so Node treats the source as ES modules — Chrome never reads it.
+
+The tests cover `matches()` and `items()`, which is where the fiddly logic lives; `open()` is
+lazy, so rows can be inspected without a DOM. The rendering and selection machinery is not
+covered — load the extension and try it.
 
 ## Known limitations
 

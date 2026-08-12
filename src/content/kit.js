@@ -1,8 +1,12 @@
 /**
- * Minimal DOM helpers used by the panel and by every detector's render().
- * Everything here builds plain elements — no framework, no innerHTML with
- * page-derived strings.
+ * DOM helpers shared by the panel and every detector.
+ *
+ * `menu()` is the important one: it renders the row list used both for the
+ * root menu and for any submenu a detector wants to drill into, so a detector
+ * never has to reproduce the styling or the keyboard/selection behaviour.
  */
+
+import { glyph } from './icons.js';
 
 /** el('div', { class: 'x', onclick: fn }, child, 'text') */
 export function el(tag, props = {}, ...children) {
@@ -11,7 +15,6 @@ export function el(tag, props = {}, ...children) {
     if (v == null || v === false) continue;
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
-    else if (k === 'html') node.innerHTML = v;
     else if (k.startsWith('on') && typeof v === 'function') {
       node.addEventListener(k.slice(2).toLowerCase(), v);
     } else if (k === 'dataset') Object.assign(node.dataset, v);
@@ -24,17 +27,83 @@ export function el(tag, props = {}, ...children) {
   return node;
 }
 
-export function btn(label, onClick, { variant = '', title = '', disabled = false } = {}) {
-  return el('button', {
+export { glyph };
+
+/* ------------------------------------------------------------------ *
+ * Menu
+ * ------------------------------------------------------------------ */
+
+/**
+ * A menu item:
+ *   {
+ *     key,                  unique id, used to open a view programmatically
+ *     icon,                 glyph name from icons.js
+ *     label,                row text
+ *     value,                optional right-hand result: string | Promise<string>
+ *     detailTitle,          header for the drilled-in view (defaults to label)
+ *     open(api) -> Node     omit for a static, non-clickable row
+ *   }
+ */
+function itemRow(item, api) {
+  const clickable = typeof item.open === 'function';
+  const row = el(clickable ? 'button' : 'div', {
+    class: `hh-item${clickable ? '' : ' hh-item--static'}`,
+    ...(clickable ? { type: 'button', role: 'menuitem', tabindex: '-1' } : {})
+  });
+
+  row.append(glyph(item.icon || 'dot'));
+  row.append(el('span', { class: 'hh-lab', text: item.label }));
+
+  const value = el('span', { class: 'hh-val' });
+  if (item.value instanceof Promise) {
+    value.append(el('span', { class: 'hh-dots', 'aria-label': 'Loading' }));
+    item.value.then(
+      (v) => { value.replaceChildren(document.createTextNode(v ?? '—')); },
+      () => {
+        value.replaceChildren(glyph('warn', 'hh-glyph hh-glyph--warn'));
+        value.title = 'Could not fetch this — open the row for details';
+      }
+    );
+  } else if (item.value != null) {
+    value.textContent = item.value;
+  }
+  row.append(value);
+
+  if (clickable) {
+    row.append(glyph('chevronRight', 'hh-glyph hh-chev'));
+    row.addEventListener('click', () => {
+      api.push(item.detailTitle || item.label, item.open(api));
+    });
+  }
+
+  return row;
+}
+
+/** Renders a list of items as a menu. */
+export function menu(items, api) {
+  const list = el('div', { class: 'hh-menu', role: 'menu' });
+  for (const item of items) list.append(itemRow(item, api));
+  return list;
+}
+
+/* ------------------------------------------------------------------ *
+ * Pieces used inside drilled-in views
+ * ------------------------------------------------------------------ */
+
+export function btn(label, onClick, { variant = '', title = '', disabled = false, icon = null } = {}) {
+  const node = el('button', {
     class: `hh-btn ${variant}`.trim(),
     type: 'button',
     title,
     disabled,
     onclick: onClick
-  }, label);
+  });
+  if (icon) node.append(glyph(icon, 'hh-glyph hh-btn-icon'));
+  node.append(el('span', { text: label }));
+  return node;
 }
 
-export function spinner(label = 'Thinking…') {
+export function spinner(label = 'Working…') {
   return el('div', { class: 'hh-loading' },
     el('span', { class: 'hh-spinner', 'aria-hidden': 'true' }),
     el('span', { text: label })
@@ -45,68 +114,85 @@ export function note(text, variant = '') {
   return el('p', { class: `hh-note ${variant}`.trim(), text });
 }
 
-export function errorBox(message, { onRetry, onSettings } = {}) {
-  const box = el('div', { class: 'hh-error' }, el('span', { text: message }));
-  const actions = el('div', { class: 'hh-row' });
-  if (onRetry) actions.append(btn('Retry', onRetry, { variant: 'hh-ghost' }));
-  if (onSettings) actions.append(btn('Settings', onSettings, { variant: 'hh-ghost' }));
-  if (actions.childElementCount) box.append(actions);
-  return box;
+export function quote(text) {
+  return el('blockquote', { class: 'hh-quote', text });
 }
 
-/** Swaps a container's contents for `nodes` in one go. */
+export function errorBox(message, { onRetry, onSettings } = {}) {
+  const box = el('div', { class: 'hh-error' },
+    glyph('warn', 'hh-glyph hh-glyph--warn'),
+    el('span', { text: message })
+  );
+  const actions = el('div', { class: 'hh-row' });
+  if (onRetry) actions.append(btn('Try again', onRetry));
+  if (onSettings) actions.append(btn('Open settings', onSettings, { variant: 'hh-primary' }));
+  const wrap = el('div', {}, box);
+  if (actions.childElementCount) wrap.append(actions);
+  return wrap;
+}
+
+/** Swaps a container's contents in one go. */
 export function replaceContent(container, ...nodes) {
   container.replaceChildren(...nodes.flat().filter(Boolean));
   return container;
 }
 
-/**
- * The standard "here's your text back" block: the result, plus Copy and
- * Replace buttons wired to the page.
- */
-export function resultBlock(text, api, { label = '' } = {}) {
-  const wrap = el('div', { class: 'hh-result' });
-  if (label) wrap.append(el('div', { class: 'hh-label', text: label }));
-  wrap.append(el('div', { class: 'hh-text', text }));
-
-  const copyBtn = btn('Copy', async () => {
+/** Copy button that confirms on itself rather than in a toast. */
+export function copyButton(text, api) {
+  const copy = btn('Copy', async () => {
     const ok = await api.copy(text);
-    copyBtn.textContent = ok ? 'Copied' : 'Copy failed';
-    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1400);
+    swap(copy, ok ? 'Copied' : 'Copy failed', 'Copy');
+  }, { icon: 'copy' });
+  return copy;
+}
+
+/** Copy/Replace pair with transient confirmation on the button itself. */
+export function actionRow(text, api, extra = []) {
+  const copy = copyButton(text, api);
+
+  const replace = btn('Replace', async () => {
+    const ok = await api.replace(text);
+    swap(replace, ok ? 'Replaced' : "Couldn't replace", 'Replace');
+  }, {
+    variant: 'hh-primary',
+    icon: 'replace',
+    disabled: !api.canReplace,
+    title: api.canReplace
+      ? 'Replace the selected text on the page'
+      : "The selected text isn't in an editable field"
   });
 
-  const row = el('div', { class: 'hh-row' }, copyBtn);
+  return el('div', { class: 'hh-row' }, copy, replace, ...extra);
+}
 
-  const replaceBtn = btn(
-    'Replace',
-    async () => {
-      const ok = await api.replace(text);
-      replaceBtn.textContent = ok ? 'Replaced' : "Couldn't replace";
-      setTimeout(() => { replaceBtn.textContent = 'Replace'; }, 1400);
-    },
-    {
-      variant: 'hh-primary',
-      disabled: !api.canReplace,
-      title: api.canReplace
-        ? 'Replace the selected text on the page'
-        : "The selected text isn't in an editable field"
-    }
+function swap(button, temporary, original) {
+  const span = button.querySelector('span:last-child');
+  span.textContent = temporary;
+  setTimeout(() => { span.textContent = original; }, 1400);
+}
+
+/** The standard result view: the text, then Copy / Replace. */
+export function resultView(text, api, { label = '', extra = [] } = {}) {
+  return el('div', { class: 'hh-detail' },
+    label ? el('div', { class: 'hh-label', text: label }) : null,
+    el('div', { class: 'hh-text', text }),
+    actionRow(text, api, extra)
   );
-  row.append(replaceBtn);
-  wrap.append(row);
-  return wrap;
 }
 
 /**
- * Runs an async producer into a container: spinner first, then the result or a
- * friendly error with a retry.
+ * Runs `producer` into a fresh container: spinner, then result or error.
+ * Returns the container synchronously so it can be pushed as a view.
  */
-export async function withLoading(container, loadingLabel, producer, onError) {
-  replaceContent(container, spinner(loadingLabel));
-  try {
-    const node = await producer();
-    replaceContent(container, node);
-  } catch (err) {
-    replaceContent(container, onError(err));
-  }
+export function asyncView(loadingLabel, producer, onError) {
+  const box = el('div', { class: 'hh-detail' });
+  const run = () => {
+    replaceContent(box, spinner(loadingLabel));
+    Promise.resolve()
+      .then(producer)
+      .then((node) => replaceContent(box, node))
+      .catch((err) => replaceContent(box, onError(err, run)));
+  };
+  run();
+  return box;
 }

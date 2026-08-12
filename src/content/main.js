@@ -1,31 +1,29 @@
 /**
  * Highlight Helper — in-page controller.
  *
- * Flow: selection -> small icon -> click -> panel of detector tabs.
+ * Flow: selection -> small icon -> click -> a menu of what you can do with it.
+ * Picking a row drills into a detail view inside the same panel; a back arrow
+ * (or Escape, or Backspace) returns. The panel animates to each view's height
+ * rather than jumping.
+ *
  * Everything lives in a shadow root attached to <html>, positioned in document
  * coordinates, so page CSS can't touch it and it scrolls with the content.
  *
- * This file deliberately knows nothing about currencies, units or prompts —
- * that all lives in ./detectors/*.
+ * This file knows nothing about currencies, units or prompts — that lives in
+ * ./detectors/*, which contribute menu rows.
  */
 
 import { getSettings, onSettingsChanged, isEnabledFor } from '../common/settings.js';
 import { MSG, ERR } from '../common/constants.js';
 import { detect, getDetector } from './detectors/index.js';
-import { el, btn, errorBox, replaceContent } from './kit.js';
+import { el, menu, glyph, errorBox, note } from './kit.js';
+import { markGlyph } from './icons.js';
 
 const MIN_CHARS = 2;
 const MAX_CHARS = 8000;
+const SNIPPET_CHARS = 64;
 const GAP = 8;
 const EDGE = 8;
-
-const ICON_SVG =
-  '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-  '<path d="M14.2 3.6 20.4 9.8 11.6 18.6H5.4v-6.2z" fill="#f5c518" fill-opacity=".35"/>' +
-  '<path d="M14.2 3.6 20.4 9.8 11.6 18.6H5.4v-6.2z" fill="none" stroke="currentColor" ' +
-  'stroke-width="1.6" stroke-linejoin="round"/>' +
-  '<path d="M4 21.2h16" fill="none" stroke="currentColor" stroke-width="1.8" ' +
-  'stroke-linecap="round"/></svg>';
 
 /* ------------------------------------------------------------------ *
  * State
@@ -38,6 +36,17 @@ let mode = 'hidden';           // 'hidden' | 'icon' | 'panel'
 let pointerDown = false;
 let suppressEvents = false;    // set while we ourselves touch the selection
 let evaluateTimer = 0;
+
+// Panel internals, rebuilt on each open.
+let panel = null;
+let headEl = null;
+let viewsEl = null;
+let footEl = null;
+let stack = [];                // [{ title, node }]
+let heightLock = null;         // target views height mid-animation, else null
+let heightTimer = 0;
+let sizeObserver = null;
+let activeRow = -1;
 
 // Start fetching the stylesheet immediately; it's needed before the first paint.
 const cssPromise = fetch(chrome.runtime.getURL('src/content/panel.css'))
@@ -85,10 +94,6 @@ async function ensureUi() {
     );
     if (!interactive) e.preventDefault();
   }, true);
-
-  host.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { e.stopPropagation(); hide(); }
-  });
 
   document.documentElement.append(host);
   ui = { host, shadow, layer };
@@ -190,10 +195,15 @@ function liveAnchorRect() {
     const rects = current.range.getClientRects();
     if (rects.length) return rects[rects.length - 1];
     const r = current.range.getBoundingClientRect();
-    if (r.width || r.height) return r;
-    return null;
+    return r.width || r.height ? r : null;
   }
   return current.anchorRect;
+}
+
+/** One-line version of the selection for the panel header. */
+function snippet(text) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > SNIPPET_CHARS ? `${flat.slice(0, SNIPPET_CHARS - 1)}…` : flat;
 }
 
 /* ------------------------------------------------------------------ *
@@ -203,13 +213,16 @@ function liveAnchorRect() {
 /**
  * Places the layer's single child near `anchor` (a viewport rect), flipping
  * above when there's no room below and clamping to the viewport edges.
+ *
+ * `heightHint` is the height the panel is animating *towards* — using the
+ * measured height mid-transition would make the panel creep as it grows.
  */
-function position(anchor, { align = 'start' } = {}) {
-  const node = ui.layer.firstElementChild;
+function position(anchor, { align = 'start', heightHint = null } = {}) {
+  const node = ui?.layer.firstElementChild;
   if (!node || !anchor) return;
 
   const w = node.offsetWidth;
-  const h = node.offsetHeight;
+  const h = heightHint ?? node.offsetHeight;
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
@@ -226,11 +239,23 @@ function position(anchor, { align = 'start' } = {}) {
   ui.layer.style.top = `${Math.round(top + window.scrollY)}px`;
 }
 
+/**
+ * Height the panel is animating towards, or null when it is at rest — in
+ * which case the measured height is already correct.
+ */
+function panelHeightHint() {
+  if (!panel || heightLock == null) return null;
+  const chrome = headEl.offsetHeight + (footEl.hidden ? 0 : footEl.offsetHeight) + 2;
+  return chrome + heightLock;
+}
+
 function reposition() {
   if (mode === 'hidden' || !ui) return;
   const anchor = liveAnchorRect();
   if (!anchor) { hide(); return; }
-  position(anchor, mode === 'icon' ? { align: 'end' } : {});
+  position(anchor, mode === 'icon'
+    ? { align: 'end' }
+    : { heightHint: panelHeightHint() });
 }
 
 /* ------------------------------------------------------------------ *
@@ -331,7 +356,7 @@ function openOptions() {
 }
 
 const FRIENDLY = {
-  [ERR.NO_KEY]: 'Add your DeepSeek API key in settings to use the AI features.',
+  [ERR.NO_KEY]: 'Add your DeepSeek API key in settings to use the AI tools.',
   [ERR.BAD_KEY]: 'DeepSeek rejected that API key. Check it in settings.',
   [ERR.NO_FUNDS]: 'Your DeepSeek account is out of credit.',
   [ERR.RATE_LIMIT]: 'DeepSeek is rate-limiting right now. Try again in a moment.',
@@ -363,8 +388,116 @@ function makeApi(extra = {}) {
     replace: replaceSelection,
     errorFor,
     openOptions,
+    push: pushView,
+    pop: popView,
+    close: hide,
     ...extra
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * View stack
+ * ------------------------------------------------------------------ */
+
+/**
+ * Animates the view container from its current height to `target`, then hands
+ * height back to `auto`.
+ *
+ * The resting state is deliberately `auto`: async results (AI replies, rate
+ * lookups) land at unpredictable times, and an explicit height that failed to
+ * update would clip them. The lock exists only for the duration of the
+ * transition, and a timer — not `transitionend` — releases it, so it still
+ * releases under prefers-reduced-motion where no transition event fires.
+ */
+function animateViewsTo(target) {
+  clearTimeout(heightTimer);
+  const from = viewsEl.offsetHeight;
+
+  viewsEl.style.height = `${from}px`;
+  void viewsEl.offsetHeight; // force the browser to accept the start value
+  viewsEl.style.height = `${target}px`;
+  heightLock = target;
+  reposition();
+
+  heightTimer = setTimeout(() => {
+    if (!viewsEl) return;
+    viewsEl.style.height = '';
+    heightLock = null;
+    reposition();
+  }, 190);
+}
+
+/**
+ * Keeps the panel on screen when a view grows on its own. Purely positional —
+ * sizing is the browser's job now, so a missing ResizeObserver costs nothing.
+ */
+function observeView(node) {
+  sizeObserver?.disconnect();
+  sizeObserver = null;
+  if (typeof ResizeObserver !== 'function') return;
+  sizeObserver = new ResizeObserver(() => {
+    if (heightLock == null) reposition();
+  });
+  sizeObserver.observe(node);
+}
+
+function showView(view, direction) {
+  const outgoing = viewsEl.lastElementChild;
+
+  view.node.classList.add('hh-view', 'hh-enter',
+    direction === 'back' ? 'hh-from-left' : 'hh-from-right');
+
+  if (outgoing) {
+    outgoing.classList.add('hh-view--out',
+      direction === 'back' ? 'hh-out-right' : 'hh-out-left');
+    setTimeout(() => outgoing.remove(), 200);
+  }
+
+  viewsEl.append(view.node);
+  renderChrome();
+
+  // Measure while the entering view is laid out but still transparent.
+  animateViewsTo(view.node.offsetHeight);
+  requestAnimationFrame(() => {
+    view.node.classList.remove('hh-enter', 'hh-from-left', 'hh-from-right');
+  });
+
+  observeView(view.node);
+  activeRow = -1;
+}
+
+function pushView(title, node) {
+  if (!panel || !node) return;
+  stack.push({ title, node });
+  showView(stack[stack.length - 1], 'forward');
+}
+
+function popView() {
+  if (stack.length < 2) return;
+  stack.pop();
+  showView(stack[stack.length - 1], 'back');
+}
+
+function renderChrome() {
+  const top = stack[stack.length - 1];
+  headEl.replaceChildren();
+
+  if (stack.length > 1) {
+    const back = el('button', {
+      class: 'hh-back',
+      type: 'button',
+      'aria-label': 'Back',
+      onclick: popView
+    }, glyph('chevronLeft'));
+    headEl.append(back, el('span', { class: 'hh-title', text: top.title }));
+  } else {
+    headEl.append(el('span', {
+      class: 'hh-snip',
+      text: `“${snippet(current?.text || '')}”`
+    }));
+  }
+
+  footEl.hidden = stack.length > 1;
 }
 
 /* ------------------------------------------------------------------ *
@@ -372,10 +505,16 @@ function makeApi(extra = {}) {
  * ------------------------------------------------------------------ */
 
 function hide() {
-  if (!ui) { mode = 'hidden'; current = null; return; }
-  ui.layer.replaceChildren();
+  sizeObserver?.disconnect();
+  sizeObserver = null;
+  clearTimeout(heightTimer);
+  panel = headEl = viewsEl = footEl = null;
+  stack = [];
+  heightLock = null;
+  activeRow = -1;
   mode = 'hidden';
   current = null;
+  if (ui) ui.layer.replaceChildren();
 }
 
 async function showIcon(selection) {
@@ -388,9 +527,9 @@ async function showIcon(selection) {
     class: 'hh-icon',
     type: 'button',
     title: 'Highlight Helper',
-    'aria-label': 'Open Highlight Helper',
-    html: ICON_SVG
-  });
+    'aria-label': 'Open Highlight Helper'
+  }, markGlyph());
+
   button.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -402,13 +541,8 @@ async function showIcon(selection) {
   requestAnimationFrame(() => button.classList.add('hh-in'));
 }
 
-async function openPanel({ preselect = null, forcedLanguage = null, forceIds = [] } = {}) {
-  if (!current) return;
-  await ensureUi();
-  // ensureUi awaits the stylesheet on first use; the selection may be gone by now.
-  if (!current) return;
-  mode = 'panel';
-
+/** Collects menu rows from every detector that matched. */
+function collectItems(api, forceIds = []) {
   const hits = detect(current.text, settings);
 
   // The right-click menu can request a detector the user has switched off.
@@ -423,96 +557,117 @@ async function openPanel({ preselect = null, forcedLanguage = null, forceIds = [
     hits.unshift({ detector, match: match || {}, priority: -1 });
   }
 
-  const panel = el('div', {
+  const items = [];
+  for (const hit of hits) {
+    let produced;
+    try {
+      produced = hit.detector.items({
+        text: current.text,
+        match: hit.match,
+        settings,
+        api
+      });
+    } catch (err) {
+      console.warn(`[Highlight Helper] detector "${hit.detector.id}" failed:`, err);
+      continue;
+    }
+    for (const item of produced || []) items.push(item);
+  }
+  return items;
+}
+
+async function openPanel({ openTo = null, forcedLanguage = null, forceIds = [] } = {}) {
+  if (!current) return;
+  await ensureUi();
+  // ensureUi awaits the stylesheet on first use; the selection may be gone by now.
+  if (!current) return;
+  mode = 'panel';
+
+  headEl = el('div', { class: 'hh-head' });
+  viewsEl = el('div', { class: 'hh-views' });
+  footEl = el('div', { class: 'hh-foot' },
+    el('span', { text: 'Highlight Helper' }),
+    el('button', { type: 'button', onclick: openOptions }, 'Settings')
+  );
+
+  panel = el('div', {
     class: 'hh-panel',
     role: 'dialog',
     'aria-label': 'Highlight Helper'
-  });
+  }, headEl, viewsEl, footEl);
 
-  const body = el('div', { class: 'hh-body' });
+  stack = [];
+  ui.layer.replaceChildren(panel);
 
-  if (!hits.length) {
-    panel.append(
-      body,
-      el('div', { class: 'hh-foot' },
-        el('span', { text: 'Highlight Helper' }),
-        btn('Settings', openOptions))
-    );
-    replaceContent(body, el('p', { class: 'hh-note', text: 'Nothing to do with this selection.' }));
-    ui.layer.replaceChildren(panel);
-    position(liveAnchorRect() || current.anchorRect);
-    requestAnimationFrame(() => panel.classList.add('hh-in'));
+  const api = makeApi(forcedLanguage ? { forcedLanguage } : {});
+  const items = collectItems(api, forceIds);
+
+  const root = items.length
+    ? menu(items, api)
+    : el('div', { class: 'hh-detail' },
+        note('Nothing to convert, explain or rewrite in this selection.'));
+
+  stack.push({ title: '', node: root });
+  showView(stack[0], 'forward');
+
+  requestAnimationFrame(() => panel.classList.add('hh-in'));
+
+  // Right-click "Translate to…" opens straight into the translation.
+  if (openTo) {
+    const target = items.find((i) => i.key === openTo);
+    if (target?.open) pushView(target.detailTitle || target.label, target.open(api));
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Keyboard
+ * ------------------------------------------------------------------ */
+
+function menuRows() {
+  const active = viewsEl?.lastElementChild;
+  if (!active) return [];
+  return [...active.querySelectorAll('.hh-item:not(.hh-item--static)')];
+}
+
+function highlightRow(index) {
+  const rows = menuRows();
+  for (const row of rows) delete row.dataset.active;
+  if (!rows.length) return;
+  activeRow = (index + rows.length) % rows.length;
+  const row = rows[activeRow];
+  row.dataset.active = '';
+  row.scrollIntoView({ block: 'nearest' });
+}
+
+/** True when the page has focus somewhere we must not steal keys from. */
+function pageIsTyping() {
+  const active = deepActiveElement();
+  return isTextField(active) || Boolean(active?.isContentEditable);
+}
+
+function onKeyDown(e) {
+  if (mode === 'hidden') return;
+
+  if (e.key === 'Escape') {
+    if (mode === 'panel' && stack.length > 1) popView();
+    else hide();
+    e.preventDefault();
     return;
   }
 
-  const api = makeApi(forcedLanguage ? { forcedLanguage } : {});
-  const tabsRow = el('div', { class: 'hh-tabs', role: 'tablist' });
-  const rendered = new Map();
+  if (mode !== 'panel' || pageIsTyping()) return;
 
-  function selectTab(id) {
-    for (const tab of tabsRow.children) {
-      tab.setAttribute('aria-selected', String(tab.dataset.id === id));
-    }
-    if (!rendered.has(id)) {
-      const hit = hits.find((h) => h.detector.id === id);
-      let node;
-      try {
-        node = hit.detector.render({
-          text: current.text,
-          match: hit.match,
-          settings,
-          api
-        });
-      } catch (err) {
-        console.warn(`[Highlight Helper] "${id}" render failed:`, err);
-        node = errorBox(`This tool failed: ${err.message}`);
-      }
-      rendered.set(id, node);
-    }
-    replaceContent(body, rendered.get(id));
-    // Content height changes as results come in; keep the panel on screen.
-    requestAnimationFrame(reposition);
-  }
-
-  for (const hit of hits) {
-    const tab = el('button', {
-      class: 'hh-tab',
-      type: 'button',
-      role: 'tab',
-      'aria-selected': 'false',
-      dataset: { id: hit.detector.id }
-    }, hit.detector.title);
-    tab.addEventListener('click', () => selectTab(hit.detector.id));
-    tabsRow.append(tab);
-  }
-
-  tabsRow.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-    const ids = hits.map((h) => h.detector.id);
-    const active = [...tabsRow.children].findIndex(
-      (t) => t.getAttribute('aria-selected') === 'true'
-    );
-    const next = (active + (e.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length;
-    selectTab(ids[next]);
-    tabsRow.children[next].focus();
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!menuRows().length) return;
+    highlightRow(activeRow < 0 ? (e.key === 'ArrowDown' ? 0 : -1) : activeRow + (e.key === 'ArrowDown' ? 1 : -1));
     e.preventDefault();
-  });
-
-  const foot = el('div', { class: 'hh-foot' },
-    el('span', { text: 'Highlight Helper' }),
-    btn('Settings', openOptions)
-  );
-
-  panel.append(tabsRow, body, foot);
-  ui.layer.replaceChildren(panel);
-
-  const chosen = hits.some((h) => h.detector.id === preselect)
-    ? preselect
-    : hits[0].detector.id;
-  selectTab(chosen);
-
-  position(liveAnchorRect() || current.anchorRect);
-  requestAnimationFrame(() => panel.classList.add('hh-in'));
+  } else if (e.key === 'Enter' && activeRow >= 0) {
+    menuRows()[activeRow]?.click();
+    e.preventDefault();
+  } else if ((e.key === 'Backspace' || e.key === 'ArrowLeft') && stack.length > 1) {
+    popView();
+    e.preventDefault();
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -565,12 +720,6 @@ function onPointerUp() {
   scheduleEvaluate(40);
 }
 
-function onKeyDown(e) {
-  // Keyboard selection (shift+arrows) is covered by selectionchange; the only
-  // key we care about here is the dismiss.
-  if (e.key === 'Escape' && mode !== 'hidden') hide();
-}
-
 function onScrollOrResize() {
   if (mode === 'hidden') return;
   reposition();
@@ -585,16 +734,19 @@ function onRuntimeMessage(msg) {
     current = live;
   } else if (msg.text?.trim()) {
     // Selection was lost (some pages clear it on right-click). Fall back to
-    // the text Chrome captured, anchored to the middle of the viewport.
+    // the text Chrome captured, anchored near the top of the viewport.
     const vw = document.documentElement.clientWidth;
-    const rect = { left: vw / 2 - 170, right: vw / 2 + 170, top: 80, bottom: 80, width: 340, height: 0 };
+    const rect = {
+      left: vw / 2 - 158, right: vw / 2 + 158,
+      top: 80, bottom: 80, width: 316, height: 0
+    };
     current = { text: msg.text, rect, anchorRect: rect, range: null, editable: null };
   } else {
     return;
   }
 
   openPanel({
-    preselect: 'translate',
+    openTo: 'translate',
     forcedLanguage: msg.language,
     forceIds: ['translate']
   });

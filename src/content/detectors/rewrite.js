@@ -1,29 +1,31 @@
 /**
  * Rewriter + spell/grammar fixer for longer selections.
  *
- * Intent comes first: you pick a tone button, and only then does anything get
- * sent. The result arrives with Copy and Replace, where Replace writes back
- * into the textarea/contenteditable the text came from.
+ * "Rewrite" drills into a tone submenu rather than a flyout — a flyout near a
+ * screen edge has to flip sides and is awkward on touch, and the extra depth
+ * costs one keystroke.
+ *
+ * Results arrive with the original above them, so a grammar fix can be checked
+ * against what it replaced.
  */
 
-import { el, btn, replaceContent, resultBlock, spinner } from '../kit.js';
+import { el, menu, asyncView, quote, actionRow } from '../kit.js';
 import { AI } from '../../common/constants.js';
 
 const MAX_LEN = 6000;
 
 const TONES = [
-  { action: AI.FIX, label: 'Fix grammar', busy: 'Proofreading…', title: 'Correct spelling, grammar and punctuation' },
-  { action: AI.SHORTER, label: 'Shorter', busy: 'Trimming…', title: 'Condense while keeping the meaning' },
-  { action: AI.FORMAL, label: 'Formal', busy: 'Formalising…', title: 'Rewrite in a professional register' },
-  { action: AI.CASUAL, label: 'Casual', busy: 'Loosening up…', title: 'Rewrite in a conversational tone' }
+  { action: AI.FIX, icon: 'fix', label: 'Fix spelling & grammar', busy: 'Proofreading…' },
+  { action: AI.SHORTER, icon: 'shorter', label: 'Make it shorter', busy: 'Trimming…' },
+  { action: AI.FORMAL, icon: 'formal', label: 'More formal', busy: 'Formalising…' },
+  { action: AI.CASUAL, icon: 'casual', label: 'More casual', busy: 'Loosening up…' }
 ];
 
 /** Long enough to be worth rewriting, or clearly a full sentence. */
 function looksLikeProse(text, settings) {
   const t = text.trim();
   if (t.length >= settings.minRewriteChars) return true;
-  const words = t.split(/\s+/).length;
-  return words >= 6 && /[.!?]/.test(t);
+  return t.split(/\s+/).length >= 6 && /[.!?]/.test(t);
 }
 
 export default {
@@ -35,50 +37,39 @@ export default {
     const t = text.trim();
     if (!t || t.length > MAX_LEN) return null;
     if (!looksLikeProse(t, settings)) return null;
-    return {
-      words: t.split(/\s+/).length,
-      chars: t.length
-    };
+    return { words: t.split(/\s+/).length, chars: t.length };
   },
 
-  render({ text, match, api }) {
-    const box = el('div', {});
-
-    function idle() {
-      const buttons = TONES.map((tone) =>
-        btn(tone.label, () => run(tone), { title: tone.title })
-      );
-      replaceContent(
-        box,
-        el('p', { class: 'hh-sub', text: `${match.words} words selected` }),
-        el('blockquote', { class: 'hh-quote', text }),
-        el('div', { class: 'hh-row' }, ...buttons)
-      );
-    }
-
-    async function run(tone) {
-      replaceContent(box, spinner(tone.busy));
-      try {
-        const res = await api.ai(tone.action, text);
-        const out = el('div', {},
-          resultBlock(res.text, api, {
-            label: `${tone.label}${res.cached ? ' · cached' : ''}`
-          })
-        );
-        out.append(
-          el('div', { class: 'hh-row' },
-            ...TONES.filter((t) => t.action !== tone.action).map((t) =>
-              btn(t.label, () => run(t), { variant: 'hh-ghost', title: t.title })
-            )
-          )
-        );
-        replaceContent(box, out);
-      } catch (err) {
-        replaceContent(box, api.errorFor(err, () => run(tone)));
-      }
-    }
-
-    idle();
-    return box;
+  items({ text, match }) {
+    return [{
+      key: 'rewrite',
+      icon: 'rewrite',
+      label: 'Rewrite',
+      value: `${match.words} words`,
+      detailTitle: 'Rewrite',
+      open: (api) => menu(
+        TONES.map((tone) => ({
+          key: `rewrite:${tone.action}`,
+          icon: tone.icon,
+          label: tone.label,
+          detailTitle: tone.label,
+          open: (ctx) => resultView(text, tone, ctx)
+        })),
+        api
+      )
+    }];
   }
 };
+
+function resultView(text, tone, api) {
+  return asyncView(tone.busy, async () => {
+    const res = await api.ai(tone.action, text);
+    return el('div', {},
+      el('div', { class: 'hh-label', text: `Was${res.cached ? ' · cached' : ''}` }),
+      quote(text),
+      el('div', { class: 'hh-label', text: tone.label }),
+      el('div', { class: 'hh-text', text: res.text }),
+      actionRow(res.text, api)
+    );
+  }, (err, retry) => api.errorFor(err, retry));
+}

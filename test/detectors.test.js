@@ -141,6 +141,62 @@ check('a disabled detector is skipped',
   })).some((h) => h.detector.id === 'currency'),
   false);
 
+/* ---------- menu rows ---------- */
+
+/**
+ * Enough of the panel's api object for items() to build rows. Nothing here
+ * touches the DOM — open() is lazy, so the row descriptions can be inspected
+ * outside a browser.
+ */
+const fakeApi = {
+  forcedLanguage: null,
+  send: async () => ({
+    ok: true,
+    rates: { USD: 1, EUR: 0.922, GBP: 0.79, JPY: 157.2 },
+    updated: Date.parse('2026-08-12T00:00:00Z'),
+    stale: false
+  })
+};
+
+const rows = (detector, text, settings = S()) => {
+  const match = detector.matches(text, settings);
+  return match ? detector.items({ text, match, settings, api: fakeApi }) : [];
+};
+
+const currencyRows = rows(currency, '$50', S({ targetCurrency: 'EUR' }));
+check('currency row label', currencyRows[0].label, 'Convert to EUR');
+check('currency row resolves its value', await currencyRows[0].value, '€46.10');
+check('currency row is clickable', typeof currencyRows[0].open, 'function');
+
+const sameRows = rows(currency, '$50', S({ targetCurrency: 'USD' }));
+check('same-currency row is static', sameRows[0].open, undefined);
+check('same-currency row still reports the amount', sameRows[0].value, '$50.00');
+
+const unitRows = rows(unit, '5 miles');
+check('unit row label names the target unit', unitRows[0].label, 'Convert to km');
+check('unit row carries the answer inline', unitRows[0].value, '8.05 km');
+
+check('acronym row quotes the term', rows(jargon, 'SLA')[0].label, 'Expand “SLA”');
+check('phrase row is generic', rows(jargon, 'technical debt')[0].label, 'Explain this');
+check('translate row names the target', rows(translate, 'Hola amigo mio')[0].label,
+  'Translate to English');
+
+const rewriteRows = rows(rewrite, 'The quick brown fox jumped over the lazy dog and ran.');
+check('rewrite row label', rewriteRows[0].label, 'Rewrite');
+check('rewrite row shows length', rewriteRows[0].value, '11 words');
+
+// Every row the panel can build needs a stable, unique key.
+const allRows = [
+  ...rows(currency, '$50', S({ targetCurrency: 'EUR' })),
+  ...rows(unit, '5 miles'),
+  ...rows(jargon, 'SLA'),
+  ...rows(translate, 'Hola amigo mio'),
+  ...rewriteRows
+];
+check('every row has a key', allRows.every((r) => typeof r.key === 'string' && r.key), true);
+check('keys are unique', new Set(allRows.map((r) => r.key)).size, allRows.length);
+check('every row has an icon', allRows.every((r) => typeof r.icon === 'string'), true);
+
 /* ---------- report ---------- */
 
 console.log(`${passed} passed, ${failures.length} failed`);
