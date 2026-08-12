@@ -79,10 +79,17 @@ function itemRow(item, api) {
   return row;
 }
 
-/** Renders a list of items as a menu. */
+/**
+ * Renders a list of items as a menu.
+ *
+ * The items are stashed on the element so the panel can drill straight to a
+ * row inside a submenu — a right-click on "Rewrite → More formal" has to find
+ * `rewrite:formal`, which only exists once the parent row has been opened.
+ */
 export function menu(items, api) {
   const list = el('div', { class: 'hh-menu', role: 'menu' });
   for (const item of items) list.append(itemRow(item, api));
+  list.hhItems = items;
   return list;
 }
 

@@ -11,14 +11,15 @@ import { parseNumber } from '../src/common/numbers.js';
 import currency from '../src/content/detectors/currency.js';
 import unit from '../src/content/detectors/unit.js';
 import jargon from '../src/content/detectors/jargon.js';
-import rewrite from '../src/content/detectors/rewrite.js';
+import rewrite, { TONES as REWRITE_TONES } from '../src/content/detectors/rewrite.js';
 import translate from '../src/content/detectors/translate.js';
 import color from '../src/content/detectors/color.js';
 import datetime from '../src/content/detectors/datetime.js';
 import calc from '../src/content/detectors/calc.js';
 import numberbase from '../src/content/detectors/numberbase.js';
 import decode from '../src/content/detectors/decode.js';
-import texttools from '../src/content/detectors/texttools.js';
+import texttools, { TRANSFORMS as TEXT_TRANSFORMS } from '../src/content/detectors/texttools.js';
+import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import summarize from '../src/content/detectors/summarize.js';
 import coords from '../src/content/detectors/coords.js';
 import regex from '../src/content/detectors/regex.js';
@@ -515,6 +516,48 @@ const allRows = [
 check('every row has a key', allRows.every((r) => typeof r.key === 'string' && r.key), true);
 check('keys are unique', new Set(allRows.map((r) => r.key)).size, allRows.length);
 check('every row has an icon', allRows.every((r) => typeof r.icon === 'string'), true);
+
+/* ---------- right-click menu ---------- */
+
+// Every context-menu id has to be a real row key, or the menu entry silently
+// does nothing. The two lists live apart on purpose — the service worker must
+// not import content-script code — so this is what ties them together.
+const contextIds = [];
+for (const item of CONTEXT_TOOLS) {
+  if (item.type === 'separator' || item.id === 'menu') continue;
+  contextIds.push(item.id);
+  if (Array.isArray(item.children)) for (const c of item.children) contextIds.push(c.id);
+}
+
+// Keys the detectors actually produce, gathered from the modules themselves.
+const topLevelKeys = new Set([
+  ...rows(jargon, 'SLA').map((r) => r.key),
+  ...rows(translate, 'Hola amigo mio').map((r) => r.key),
+  ...rows(summarize, longText).map((r) => r.key),
+  ...rewriteRows.map((r) => r.key),
+  ...rows(code, JS).map((r) => r.key),
+  ...rows(qr, 'https://example.com').map((r) => r.key),
+  ...ttRows.map((r) => r.key)
+]);
+const submenuKeys = new Set([
+  ...REWRITE_TONES.map((t) => `rewrite:${t.action}`),
+  'texttools:count',
+  ...TEXT_TRANSFORMS.map((t) => `texttools:${t.key}`)
+]);
+
+const missing = contextIds.filter((id) => !topLevelKeys.has(id) && !submenuKeys.has(id));
+check('every right-click entry maps to a real menu row', missing, []);
+
+check('a tool id resolves to the detector that owns it', [
+  detectorForTool('explain'),
+  detectorForTool('keypoints'),
+  detectorForTool('rewrite:formal'),
+  detectorForTool('texttools:slug'),
+  detectorForTool('code:comment')
+], ['jargon', 'summarize', 'rewrite', 'texttools', 'code']);
+
+check('every tool family has an explanation for when it does not apply',
+  [...new Set(contextIds.map(toolFamily))].filter((f) => !TOOL_HINTS[f]), []);
 
 /* ---------- report ---------- */
 

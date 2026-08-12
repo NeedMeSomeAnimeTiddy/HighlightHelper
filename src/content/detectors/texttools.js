@@ -26,7 +26,7 @@ function words(text) {
 
 const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
 
-const TRANSFORMS = [
+export const TRANSFORMS = [
   { key: 'upper', label: 'UPPERCASE', fn: (t) => t.toUpperCase() },
   { key: 'lower', label: 'lowercase', fn: (t) => t.toLowerCase() },
   {

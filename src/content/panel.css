@@ -248,6 +248,14 @@
 
 .hh-menu { padding: 4px 5px; }
 
+/* Explanation shown when a right-click asked for a tool that doesn't apply. */
+.hh-menu > .hh-note {
+  padding: 4px 7px 7px;
+  margin-bottom: 3px;
+  border-bottom: 1px solid var(--hh-border);
+  line-height: 1.4;
+}
+
 .hh-item {
   display: flex;
   align-items: center;

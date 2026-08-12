@@ -48,8 +48,7 @@ paragraph with only its ending would be wrong.
 Free tools resolve up front, so the menu often answers before you click anything. Anything
 that costs money waits for you to pick its row — that click is the consent.
 
-You can also right-click any selection and pick **Translate to…** for a one-off translation
-into a language other than your default; that opens the panel straight at the result.
+Every tool is also on the right-click menu, under **Highlight Helper** — see below.
 
 ---
 
@@ -119,6 +118,50 @@ that field keeps its arrow keys and only <kbd>Esc</kbd> is intercepted.
 from a text field, textarea, or contenteditable — ordinary page text isn't editable, and the
 button is disabled with a tooltip explaining why.
 
+## The right-click menu
+
+The icon doesn't always appear — a page can swallow mouse events, you might select with the
+keyboard, or you may have switched the extension off for that site. So everything is also
+under **Highlight Helper** on the right-click menu:
+
+```
+Highlight Helper  ▸
+  Open Highlight Helper          ← the detected menu, same as clicking the icon
+  ───────────────
+  Explain this
+  Translate to…  ▸               English, Spanish, French, … (16)
+  ───────────────
+  Summarise
+  Key points
+  Rewrite  ▸                     Fix grammar / Shorter / Formal / Casual / Continue
+  ───────────────
+  Explain this code
+  Add comments to this code
+  Text tools  ▸                  Count / UPPERCASE / … / URL slug
+  QR code
+```
+
+Picking one opens the panel straight at that result, drilling through submenus on the way, so
+Back still walks you out through *Rewrite* to the full menu.
+
+**Open Highlight Helper** is the general fallback — it runs normal detection, so it reaches
+the pattern-matched tools (colour, dates, currency, units, coordinates, regex, bases,
+decoding) too. Those don't get their own entries because Chrome builds context menus once
+rather than per-selection, so a *Convert currency* entry would mostly say "not found".
+
+Three things worth knowing:
+
+- **A right-click overrides the per-site switch.** If Highlight Helper is off for the site,
+  the menu still works and the panel says so.
+- **It also overrides a disabled tool.** Asking for a tool you've switched off in settings
+  runs it anyway — you asked for it by name.
+- **If a tool doesn't apply**, you get the menu that *does* apply, with a line at the top
+  saying why. Asking to summarise the word "SLA" gets "Summarising needs a paragraph or more."
+
+If the content script isn't running on the page at all, the worker injects it and retries
+once — that's what the `scripting` permission is for. Some targets can never be reached
+whatever we do: Chrome's PDF viewer, `chrome://` pages, and the Web Store.
+
 ## Cost control
 
 DeepSeek calls are cheap but not free, so:
@@ -149,6 +192,7 @@ src/
     settings.js               defaults, sync/local split, API key accessors
     currencies.js             ISO codes, symbol table, display symbols
     languages.js              language list + context-menu subset
+    tools.js                  the right-click menu tree and its ids
     numbers.js                grouping-aware number parse/format
     text.js                   "is this actually prose?" helpers
     hash.js                   FNV-1a + cache key builder
@@ -213,6 +257,13 @@ and `detectors/codelang.js` they cheerfully offer to translate a hex colour, rew
 and QR-encode a whole paragraph. A selection like `#3f8ae0` already has a detector that owns
 it; a second, useless row is pure noise. "Fix spelling & grammar" pointed at a function body
 is worse than noise, which is why `rewrite` refuses anything `isCode()` recognises.
+
+**How the right-click menu stays in step.** Each context-menu id in `common/tools.js` is also
+a menu-row `key`, so a click is just "open the panel and drill to this row" — including two
+levels down, since `kit.menu()` stashes its item list on the element it builds. The two lists
+live apart deliberately: `tools.js` imports no detectors, so the service worker never pulls in
+content-script code. A test walks both and fails if an id stops matching a real row, which is
+the only thing standing between a renamed key and a menu entry that silently does nothing.
 
 **How the QR encoder is checked.** It is written from scratch, so `test/qr-roundtrip.js` is a
 separate reader that decodes a generated matrix back to its original text and verifies the
@@ -306,10 +357,11 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-210 assertions over number parsing, every detector's `matches()`, menu row construction,
-ordering, the QR encoder and its round trip — including a block that pins down what the
-catch-all detectors must *not* claim. No framework, no dependencies. `package.json` exists
-only so Node treats the source as ES modules — Chrome never reads it.
+213 assertions over number parsing, every detector's `matches()`, menu row construction,
+ordering, the QR encoder and its round trip, and the right-click menu's ids — including a
+block that pins down what the catch-all detectors must *not* claim. No framework, no
+dependencies. `package.json` exists only so Node treats the source as ES modules — Chrome
+never reads it.
 
 The tests cover `matches()` and `items()`, which is where the fiddly logic lives; `open()` is
 lazy, so rows can be inspected without a DOM. The rendering and selection machinery is not
@@ -362,6 +414,11 @@ Sketched and deliberately left out, roughly in order of how useful they'd be:
   (so React-style controlled components see the change) and `execCommand('insertText')` for
   contenteditable. Editors with their own document model — Google Docs, some CodeMirror
   setups — won't accept it. Copy always works.
-- **PDFs and the Chrome Web Store** don't run content scripts, so nothing appears there.
+- **PDFs and the Chrome Web Store** don't run content scripts, so nothing appears there — and
+  the right-click fallback can't reach them either, since injection is blocked on those
+  targets too.
+- **Context menu entries are static.** Chrome has no "before show" event, so the same entries
+  appear whatever you highlighted; the panel explains when one doesn't apply rather than the
+  menu hiding it.
 - **Same-tab frames only.** The script runs in frames larger than 80×80px; selections inside a
   cross-origin iframe are handled by that frame's own copy.

@@ -9,49 +9,123 @@
 import { MSG, AI } from '../common/constants.js';
 import { getSettings, getApiKey } from '../common/settings.js';
 import { CONTEXT_MENU_LANGUAGES, languageName } from '../common/languages.js';
+import { CONTEXT_TOOLS } from '../common/tools.js';
 import { cacheGet, cacheSet, cacheClear, cacheStats } from './cache.js';
 import { cacheKey } from '../common/hash.js';
 import { getRates, clearRates } from './rates.js';
 import { runAi, testApiKey } from './deepseek.js';
 
-const MENU_PARENT = 'hh-translate-to';
+/*
+ * Right-click menu.
+ *
+ * This mirrors the in-page menu so every tool is reachable even when the
+ * selection icon never appears — a page that swallows mouse events, a
+ * selection made with the keyboard, or a site the extension is switched off
+ * for. Chrome builds these once rather than per-selection (there is no
+ * "before show" event), so the entries are static and the panel explains it
+ * when one does not apply to what you highlighted.
+ */
+
+const ROOT = 'hh-root';
+const PREFIX = 'hh:';
 
 async function buildContextMenus() {
   await chrome.contextMenus.removeAll();
+
   chrome.contextMenus.create({
-    id: MENU_PARENT,
-    title: 'Translate to…',
+    id: ROOT,
+    title: 'Highlight Helper',
     contexts: ['selection']
   });
-  for (const code of CONTEXT_MENU_LANGUAGES) {
+
+  let separator = 0;
+  for (const item of CONTEXT_TOOLS) {
+    if (item.type === 'separator') {
+      chrome.contextMenus.create({
+        id: `${ROOT}-sep-${separator++}`,
+        parentId: ROOT,
+        type: 'separator',
+        contexts: ['selection']
+      });
+      continue;
+    }
+
     chrome.contextMenus.create({
-      id: `${MENU_PARENT}:${code}`,
-      parentId: MENU_PARENT,
-      title: languageName(code),
+      id: PREFIX + item.id,
+      parentId: ROOT,
+      title: item.title,
       contexts: ['selection']
     });
+
+    if (item.children === 'languages') {
+      for (const code of CONTEXT_MENU_LANGUAGES) {
+        chrome.contextMenus.create({
+          id: `${PREFIX}translate@${code}`,
+          parentId: PREFIX + item.id,
+          title: languageName(code),
+          contexts: ['selection']
+        });
+      }
+    } else if (Array.isArray(item.children)) {
+      for (const child of item.children) {
+        chrome.contextMenus.create({
+          id: PREFIX + child.id,
+          parentId: PREFIX + item.id,
+          title: child.title,
+          contexts: ['selection']
+        });
+      }
+    }
   }
 }
 
 chrome.runtime.onInstalled.addListener(buildContextMenus);
 chrome.runtime.onStartup.addListener(buildContextMenus);
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (!tab?.id || !String(info.menuItemId).startsWith(`${MENU_PARENT}:`)) return;
-  const language = String(info.menuItemId).slice(MENU_PARENT.length + 1);
-  chrome.tabs
-    .sendMessage(
-      tab.id,
-      {
-        type: MSG.TRANSLATE_SELECTION,
-        language,
-        text: info.selectionText || ''
-      },
-      info.frameId != null ? { frameId: info.frameId } : undefined
-    )
-    .catch(() => {
-      // No content script in that frame (e.g. a PDF viewer or the web store).
+/**
+ * Delivers a message to the page, injecting the content script first if it
+ * isn't there. The context-menu click grants activeTab, which is what makes
+ * the injection permissible; re-running the loader on a frame that already has
+ * it is harmless, because the ES module cache means main.js evaluates once.
+ *
+ * Some targets can never be reached — the PDF viewer, chrome:// pages, the Web
+ * Store — and that is reported rather than retried.
+ */
+async function deliver(tabId, frameId, message) {
+  const target = frameId != null ? { frameId } : undefined;
+  try {
+    return await chrome.tabs.sendMessage(tabId, message, target);
+  } catch {
+    /* no receiver yet — fall through and inject */
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: frameId != null ? { tabId, frameIds: [frameId] } : { tabId },
+      files: ['src/content/loader.js']
     });
+    // The loader imports main.js asynchronously; give it a moment to listen.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return await chrome.tabs.sendMessage(tabId, message, target);
+  } catch (err) {
+    console.warn('[Highlight Helper] cannot reach this page:', err?.message || err);
+    return null;
+  }
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const id = String(info.menuItemId);
+  if (!tab?.id || !id.startsWith(PREFIX)) return;
+
+  const raw = id.slice(PREFIX.length);
+  const [tool, language] = raw.split('@');
+
+  deliver(tab.id, info.frameId, {
+    type: MSG.RUN_TOOL,
+    tool,
+    language: language || null,
+    text: info.selectionText || ''
+  });
 });
 
 /** AI call with cache-around. Returns { text, cached }. */

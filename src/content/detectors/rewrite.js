@@ -16,7 +16,7 @@ import { isCode } from './codelang.js';
 
 const MAX_LEN = 6000;
 
-const TONES = [
+export const TONES = [
   { action: AI.FIX, icon: 'fix', label: 'Fix spelling & grammar', busy: 'Proofreading…' },
   { action: AI.SHORTER, icon: 'shorter', label: 'Make it shorter', busy: 'Trimming…' },
   { action: AI.FORMAL, icon: 'formal', label: 'More formal', busy: 'Formalising…' },

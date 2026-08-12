@@ -15,6 +15,7 @@
 
 import { getSettings, onSettingsChanged, isEnabledFor } from '../common/settings.js';
 import { MSG, ERR } from '../common/constants.js';
+import { TOOL_HINTS, toolFamily, detectorForTool } from '../common/tools.js';
 import { detect, getDetector } from './detectors/index.js';
 import { el, menu, glyph, errorBox, note } from './kit.js';
 import { markGlyph } from './icons.js';
@@ -566,7 +567,10 @@ async function showIcon(selection) {
 function collectItems(api, forceIds = []) {
   const hits = detect(current.text, settings);
 
-  // The right-click menu can request a detector the user has switched off.
+  // The right-click menu can ask for a detector the user has switched off.
+  // Only the settings toggle is bypassed — if `matches` still says no, the row
+  // genuinely does not apply and the caller explains why. Inventing an empty
+  // match here would produce rows like "undefined words".
   for (const id of forceIds) {
     if (hits.some((h) => h.detector.id === id)) continue;
     const detector = getDetector(id);
@@ -575,7 +579,7 @@ function collectItems(api, forceIds = []) {
     try {
       match = detector.matches(current.text, settings);
     } catch { /* ignore */ }
-    hits.unshift({ detector, match: match || {}, priority: -1 });
+    if (match) hits.unshift({ detector, match, priority: -1 });
   }
 
   const items = [];
@@ -597,7 +601,30 @@ function collectItems(api, forceIds = []) {
   return items;
 }
 
-async function openPanel({ openTo = null, forcedLanguage = null, forceIds = [] } = {}) {
+/**
+ * Opens the row `key` names, descending one level into a submenu if needed.
+ * Returns false when no such row exists for this selection.
+ */
+function drillTo(key, items, api) {
+  const exact = items.find((item) => item.key === key);
+  if (exact?.open) {
+    pushView(exact.detailTitle || exact.label, exact.open(api));
+    return true;
+  }
+
+  const parent = items.find((item) => key.startsWith(`${item.key}:`));
+  if (!parent?.open) return false;
+
+  const submenu = parent.open(api);
+  const child = submenu.hhItems?.find((item) => item.key === key);
+  if (!child?.open) return false;
+
+  pushView(parent.detailTitle || parent.label, submenu);
+  pushView(child.detailTitle || child.label, child.open(api));
+  return true;
+}
+
+async function openPanel({ openTo = null, forcedLanguage = null, forceIds = [], notice = null } = {}) {
   if (!current) return;
   await ensureUi();
   // ensureUi awaits the stylesheet on first use; the selection may be gone by now.
@@ -623,20 +650,27 @@ async function openPanel({ openTo = null, forcedLanguage = null, forceIds = [] }
   const api = makeApi(forcedLanguage ? { forcedLanguage } : {});
   const items = collectItems(api, forceIds);
 
-  const root = items.length
-    ? menu(items, api)
-    : el('div', { class: 'hh-detail' },
-        note('Nothing to convert, explain or rewrite in this selection.'));
+  let root;
+  if (items.length) {
+    root = menu(items, api);
+    if (notice) root.prepend(note(notice, 'hh-warn'));
+  } else {
+    root = el('div', { class: 'hh-detail' },
+      note(notice || 'Nothing to convert, explain or rewrite in this selection.'));
+  }
 
   stack.push({ title: '', node: root });
   showView(stack[0], 'forward');
 
   playEnter(panel);
 
-  // Right-click "Translate to…" opens straight into the translation.
-  if (openTo) {
-    const target = items.find((i) => i.key === openTo);
-    if (target?.open) pushView(target.detailTitle || target.label, target.open(api));
+  // A right-click asked for one specific tool — go straight to it.
+  if (openTo && !drillTo(openTo, items, api)) {
+    root.prepend(note(
+      TOOL_HINTS[toolFamily(openTo)] || "That tool doesn't apply to this selection.",
+      'hh-warn'
+    ));
+    animateViewsTo(root.offsetHeight);
   }
 }
 
@@ -746,16 +780,22 @@ function onScrollOrResize() {
   reposition();
 }
 
-/* Right-click -> "Translate to…" */
+/**
+ * Right-click menu. `tool` is a row key, or 'menu' for the detected list.
+ *
+ * This is the path that has to work when the selection icon never appeared, so
+ * it does not depend on our own listeners having fired: it re-reads the live
+ * selection, and falls back to the text Chrome captured with the click.
+ */
 function onRuntimeMessage(msg) {
-  if (msg?.type !== MSG.TRANSLATE_SELECTION) return;
+  if (msg?.type !== MSG.RUN_TOOL) return;
 
   const live = readSelection();
   if (live) {
     current = live;
   } else if (msg.text?.trim()) {
-    // Selection was lost (some pages clear it on right-click). Fall back to
-    // the text Chrome captured, anchored near the top of the viewport.
+    // Some pages clear the selection on right-click, and on others our own
+    // listeners never ran. Anchor near the top of the viewport instead.
     const vw = document.documentElement.clientWidth;
     const rect = {
       left: vw / 2 - 158, right: vw / 2 + 158,
@@ -766,10 +806,15 @@ function onRuntimeMessage(msg) {
     return;
   }
 
+  const tool = msg.tool === 'menu' ? null : msg.tool;
   openPanel({
-    openTo: 'translate',
-    forcedLanguage: msg.language,
-    forceIds: ['translate']
+    openTo: tool,
+    forcedLanguage: msg.language || null,
+    // Honour an explicit request even for a detector switched off in settings.
+    forceIds: tool ? [detectorForTool(tool)] : [],
+    notice: settings && !isEnabledFor(settings, location.hostname)
+      ? 'Highlight Helper is switched off for this site — opened from the right-click menu.'
+      : null
   });
 }
 
