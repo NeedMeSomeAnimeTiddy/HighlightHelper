@@ -96,6 +96,35 @@ need a DeepSeek key.
 written to any file in this repo. Only the background service worker ever reads it —
 content scripts ask the worker to make calls and never see the key themselves.
 
+## Nothing happens on a page
+
+Click the Highlight Helper toolbar button. The top of the popup says whether the content
+script is actually running in that tab:
+
+| | |
+| --- | --- |
+| **Active on this page** | It's working. Select some text to get the button. |
+| **Not running on this page** | See below — there's an **Activate on this page** button that fixes it immediately. |
+| **Switched off for this site** | You turned it off in this popup. The right-click menu still works. |
+| **Can't run on this page** | Chrome blocks extensions on its own pages, the Web Store and PDFs. Nothing to be done. |
+
+"Not running" has two ordinary causes, and neither prints anything in the page console, which
+is what makes it confusing:
+
+1. **The tab was already open when the extension was reloaded.** Chrome does not inject
+   content scripts into existing tabs — only into pages loaded afterwards. Refresh the tab.
+2. **Site access is set to "On click."** At `chrome://extensions` → Highlight Helper →
+   **Details** → **Site access**, choose **On all sites**. On "On click", Chrome withholds
+   content scripts until you invoke the extension on that site.
+
+**Activate on this page** in the popup injects the content script into the current tab
+directly, which works in both cases — clicking the toolbar button grants the access needed.
+It lasts until you navigate away.
+
+One console note: service worker errors do **not** appear in the page console. They're at
+`chrome://extensions` → Highlight Helper → **service worker**. If the right-click menu does
+nothing, that's where a delivery failure would be reported.
+
 ## Settings
 
 Everything below lives in `chrome.storage.sync` except the API key.

@@ -35,6 +35,41 @@ header {
   border-bottom: 1px solid var(--border);
 }
 
+.status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 9px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot.ok { background: #1a9c53; }
+.dot.warn { background: #d99100; }
+.dot.bad { background: #c0392b; }
+
+.status > div { min-width: 0; }
+.status .detail { margin: 3px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+
+button.primary {
+  margin-bottom: 10px;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+button[hidden] { display: none; }
+
 .toggle {
   display: flex;
   align-items: center;

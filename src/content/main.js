@@ -816,7 +816,20 @@ function onScrollOrResize() {
  * it does not depend on our own listeners having fired: it re-reads the live
  * selection, and falls back to the text Chrome captured with the click.
  */
-function onRuntimeMessage(msg) {
+function onRuntimeMessage(msg, sender, sendResponse) {
+  // The toolbar popup asks this to tell "not running here" apart from
+  // "running but did nothing" — the two look identical from the page.
+  if (msg?.type === MSG.PING) {
+    sendResponse({
+      ok: true,
+      version: chrome.runtime.getManifest().version,
+      host: location.hostname,
+      enabledHere: Boolean(settings && isEnabledFor(settings, location.hostname)),
+      frame: window === window.top ? 'top' : 'sub'
+    });
+    return;
+  }
+
   if (msg?.type !== MSG.RUN_TOOL) return;
 
   const live = readSelection();
