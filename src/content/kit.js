@@ -7,6 +7,7 @@
  */
 
 import { glyph } from './icons.js';
+import { MSG } from '../common/constants.js';
 
 /** el('div', { class: 'x', onclick: fn }, child, 'text') */
 export function el(tag, props = {}, ...children) {
@@ -185,6 +186,82 @@ export function resultView(text, api, { label = '', extra = [] } = {}) {
     el('div', { class: 'hh-text', text }),
     actionRow(text, api, extra)
   );
+}
+
+/**
+ * "Look this up" — an encyclopedia reference for `term`, appended to `host`.
+ *
+ * Not a citation for whatever the model just said. The model cannot cite
+ * anything, so this is an independent lookup the reader can weigh against the
+ * explanation, and the wording says so.
+ */
+export function sourceButton(term, api, host, { context = '' } = {}) {
+  const panel = el('div', { class: 'hh-source' });
+
+  const button = btn('Find a source', async () => {
+    button.replaceWith(panel);
+    replaceContent(panel, spinner('Looking for a reference…'));
+    try {
+      const res = await api.send({ type: MSG.SOURCE, term, context });
+      if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
+      const articles = res.articles || [];
+      replaceContent(panel, articles.length
+        ? articleCard(articles, 0, panel, api)
+        : noArticle(term, res.links));
+    } catch (err) {
+      replaceContent(panel, errorBox(String(err.message || err)));
+    }
+    api.resize?.();
+  }, { icon: 'source' });
+
+  host.append(button);
+  return button;
+}
+
+function openTab(url) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/**
+ * One article, plus a way to reach the others.
+ *
+ * Ambiguous terms are the normal case, not the exception — "SLA" and "Mercury"
+ * both have several plausible articles — so the alternatives stay visible
+ * rather than the panel quietly committing to one reading.
+ */
+function articleCard(articles, index, panel, api) {
+  const found = articles[index];
+  const others = articles.filter((_, i) => i !== index);
+
+  const box = el('div', { class: 'hh-source-card' });
+  replaceContent(box,
+    el('div', { class: 'hh-label', text: `Wikipedia · ${found.lang}` }),
+    el('div', { class: 'hh-source-title', text: found.title }),
+    found.description ? el('p', { class: 'hh-sub', text: found.description }) : null,
+    el('p', { class: 'hh-source-extract', text: found.extract }),
+    el('div', { class: 'hh-row' },
+      btn('Open article', () => openTab(found.url), { variant: 'hh-primary', icon: 'source' })),
+    others.length
+      ? el('div', { class: 'hh-row' },
+          el('span', { class: 'hh-sub', text: 'Did you mean:' }),
+          ...others.map((alt) => btn(alt.title, () => {
+            replaceContent(panel, articleCard(articles, articles.indexOf(alt), panel, api));
+            api.resize?.();
+          })))
+      : null,
+    note('An independent reference, not a citation for the explanation above.')
+  );
+  return box;
+}
+
+function noArticle(term, links = []) {
+  const box = el('div', { class: 'hh-source-card' });
+  replaceContent(box,
+    note(`No encyclopedia article for “${term}”. Search instead:`),
+    el('div', { class: 'hh-row' },
+      ...links.map((l) => btn(l.label, () => openTab(l.url))))
+  );
+  return box;
 }
 
 /**

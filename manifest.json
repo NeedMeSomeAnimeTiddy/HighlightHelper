@@ -9,7 +9,8 @@
 
   "host_permissions": [
     "https://api.deepseek.com/*",
-    "https://open.er-api.com/*"
+    "https://open.er-api.com/*",
+    "https://*.wikipedia.org/*"
   ],
 
   "background": {

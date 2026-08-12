@@ -99,6 +99,12 @@ const PATHS = {
   // arrow running into a wall — continue writing
   continue: ['M2.6 8h8.3M8.1 4.9 11.2 8l-3.1 3.1', 'M13.4 3.7v8.6'],
 
+  // open book — an external reference
+  source: [
+    'M8 4.4S6.6 3.1 4 3.1c-.9 0-1.4.1-1.4.1v9.5s.5-.1 1.4-.1c2.6 0 4 1.3 4 1.3s1.4-1.3 4-1.3c.9 0 1.4.1 1.4.1V3.2s-.5-.1-1.4-.1c-2.6 0-4 1.3-4 1.3z',
+    'M8 4.4v9.5'
+  ],
+
   chevronRight: ['M6.2 3.6 10.6 8l-4.4 4.4'],
   chevronLeft: ['M9.8 3.6 5.4 8l4.4 4.4'],
   copy: [

@@ -444,6 +444,38 @@
   text-align: right;
 }
 
+/*
+ * Encyclopedia reference. Set apart from the explanation above it on purpose —
+ * it corroborates, it is not a citation for what the model said.
+ */
+.hh-source { margin-top: 10px; }
+
+.hh-source-card {
+  padding: 9px 10px;
+  border: 1px solid var(--hh-border);
+  border-radius: 7px;
+  background: var(--hh-hover);
+}
+
+.hh-source-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.hh-source-extract {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-height: 130px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hh-source-card .hh-note { margin-top: 8px; }
+.hh-source-card .hh-btn { background: var(--hh-bg); }
+.hh-source-card .hh-btn.hh-primary { background: var(--hh-accent); }
+
 /* Continue writing: the original is dimmed so the new text stands out. */
 .hh-dim { color: var(--hh-muted); }
 

@@ -418,6 +418,12 @@ function makeApi(extra = {}) {
     replace: replaceSelection,
     errorFor,
     openOptions,
+    // For content that grows after its view was measured, e.g. an appended
+    // source card. Harmless when the height is already correct.
+    resize: () => {
+      const active = viewsEl?.lastElementChild;
+      if (active) animateViewsTo(active.offsetHeight);
+    },
     push: pushView,
     pop: popView,
     close: hide,

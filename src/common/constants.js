@@ -14,6 +14,8 @@ export const MSG = {
   STYLESHEET: 'hh:stylesheet',
   /** Popup -> content script: "are you running on this page?" */
   PING: 'hh:ping',
+  /** Look a term up in Wikipedia — a real reference, not a model citation. */
+  SOURCE: 'hh:source',
   /** background -> content script: open the panel, optionally at one tool. */
   RUN_TOOL: 'hh:run-tool'
 };

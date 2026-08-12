@@ -8,7 +8,7 @@
  * Costs a DeepSeek call, so nothing happens until the row is picked.
  */
 
-import { el, asyncView, copyButton } from '../kit.js';
+import { el, asyncView, copyButton, sourceButton } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { letterRatio } from '../../common/text.js';
 
@@ -64,11 +64,18 @@ export default {
         const res = await ctx.ai(AI.EXPLAIN, match.term, {
           pageContext: ctx.context.title
         });
-        return el('div', {},
+        const actions = el('div', { class: 'hh-row' }, copyButton(res.text, ctx));
+        const view = el('div', {},
           el('div', { class: 'hh-text', text: res.text }),
-          el('div', { class: 'hh-row' }, copyButton(res.text, ctx)),
+          actions,
           res.cached ? el('p', { class: 'hh-sub', text: 'From cache' }) : null
         );
+        // DeepSeek has no web access and cannot cite anything, so this is a
+        // real encyclopedia lookup rather than a citation from the model. The
+        // explanation goes along as context: it describes the sense meant, and
+        // "SLA" alone finds the Symbionese Liberation Army first.
+        sourceButton(match.term, ctx, actions, { context: res.text });
+        return view;
       }, (err, retry) => ctx.errorFor(err, retry))
     }];
   }

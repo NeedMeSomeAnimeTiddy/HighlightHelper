@@ -31,7 +31,7 @@ selection actually is:
 | A code snippet | *Explain this code*, and *Add comments* returning the same code with comments added | Yes, when you pick the row |
 | `65 mph`, `180 lbs`, `72°F`, `5'11"` | The converted measurement in the row. Open it for extras like ft+in or Kelvin | No — local |
 | A JWT, base64, `%20` escapes, JSON | Decoded or pretty-printed. JWT claims are listed, with `exp`/`iat` as real dates and an expiry warning | No — local |
-| `SLA`, `CI/CD`, `technical debt` | *Explain this* → one plain-English sentence | Yes, when you pick the row |
+| `SLA`, `CI/CD`, `technical debt` | *Explain this* → one plain-English sentence, then **Find a source** for a real encyclopedia entry | Explain yes; the source lookup is free |
 | Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
 | A paragraph or more | *Summarise* and *Key points* | Yes, when you pick the row |
 | A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual / Continue writing, each with **Copy** and **Replace** | Yes, when you pick a tone |
@@ -241,6 +241,44 @@ If the content script isn't running on the page at all, the worker injects it an
 once — that's what the `scripting` permission is for. Some targets can never be reached
 whatever we do: Chrome's PDF viewer, `chrome://` pages, and the Web Store.
 
+## Find a source
+
+After *Explain this* answers, a **Find a source** button appears. It does **not** ask the
+model for a citation.
+
+DeepSeek has no web access. Asking it for sources produces well-formatted, confident,
+entirely invented URLs — worse than offering nothing, because a fabricated citation reads as
+authoritative. So the button ignores the model and looks the term up in Wikipedia's public
+API: a real article, a real extract, a real link. It is labelled *"an independent reference,
+not a citation for the explanation above"* because that is exactly what it is — something to
+weigh the explanation against, not evidence for it.
+
+**Ambiguity is the normal case**, so the panel never silently commits to one reading. "SLA"
+and "Mercury" each have several plausible articles, and the alternatives stay on screen as
+*Did you mean:* buttons.
+
+Picking the right one uses two signals:
+
+1. **The explanation itself as context.** It describes the sense meant, so candidates are
+   scored on word overlap with it. This is what turns "SLA" from *Symbionese Liberation
+   Army* into *Service-level agreement*, and lets the same word "Mercury" resolve to the
+   planet or the element depending on what was being discussed.
+2. **Wikipedia's own relevance ranking, as a prior.** Overlap alone is gameable: *Globule
+   (CDN)* is described as a "Discontinued content delivery network" and out-scores the actual
+   *Content delivery network* article by repeating the phrase. The prior is worth roughly two
+   or three title matches — enough that a marginal edge can't overturn search, not enough to
+   hold down a clearly better match.
+
+Search runs wide (10 results) but only the top three get a summary request, because ranking
+cannot rescue a pool that lacks the right article and each summary costs a round trip.
+
+Results are cached for 7 days, keyed on term + language + context. A *transport* failure is
+never cached — otherwise one rate-limited moment would leave a term answering "no source" for
+a week. Requests carry an `Api-User-Agent` header, which is how Wikimedia asks browser-based
+callers to identify themselves; without it they rate-limit with a 429.
+
+If there's no article, you get real search links instead — never a generated URL.
+
 ## Cost control
 
 DeepSeek calls are cheap but not free, so:
@@ -278,6 +316,7 @@ src/
   background/
     service-worker.js         message router, context menu
     deepseek.js               chat-completions client + prompts (owns the key)
+    wikipedia.js              term lookup + context ranking for "Find a source"
     rates.js                  exchange rate fetch + TTL cache
     cache.js                  TTL + LRU cache over chrome.storage.local
   content/

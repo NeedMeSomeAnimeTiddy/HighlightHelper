@@ -22,6 +22,8 @@ import texttools, { TRANSFORMS as TEXT_TRANSFORMS } from '../src/content/detecto
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import { AI, ERR } from '../src/common/constants.js';
 import { buildPrompt } from '../src/background/deepseek.js';
+import { wikiLang, searchUrl, summaryUrl, isUsable, searchLinks, rankByContext }
+  from '../src/background/wikipedia.js';
 import summarize from '../src/content/detectors/summarize.js';
 import coords from '../src/content/detectors/coords.js';
 import regex from '../src/content/detectors/regex.js';
@@ -547,6 +549,52 @@ check('every action a menu row sends is declared',
   usedActions.filter((a) => !Object.values(AI).includes(a)), []);
 check('Continue writing sends a known action',
   REWRITE_TONES.some((t) => t.action === AI.CONTINUE), true);
+
+/* ---------- source lookup ---------- */
+
+check('wiki language strips a region tag', [wikiLang('en'), wikiLang('zh-TW'), wikiLang('pt')],
+  ['en', 'zh', 'pt']);
+check('a nonsense language falls back to English', wikiLang('not-a-language'), 'en');
+check('search url encodes the term',
+  searchUrl('en', 'service level agreement').includes('q=service%20level%20agreement'), true);
+check('summary url encodes the key',
+  summaryUrl('en', 'Content delivery network')
+    .endsWith('/page/summary/Content%20delivery%20network'), true);
+
+// A disambiguation page lists a dozen unrelated meanings and answers nothing.
+check('disambiguation pages are rejected',
+  isUsable({ type: 'disambiguation', extract: 'x'.repeat(200) }), false);
+check('stubs are rejected', isUsable({ type: 'standard', extract: 'Too short.' }), false);
+check('a real article is accepted',
+  isUsable({ type: 'standard', extract: 'A service-level agreement is a commitment between a provider and a client.' }),
+  true);
+check('a missing summary is rejected', isUsable(null), false);
+
+// Ranking is the difference between "SLA" finding Service-level agreement and
+// finding the Symbionese Liberation Army.
+const SLA_CANDIDATES = [
+  { title: 'Symbionese Liberation Army', description: 'American far-left militant group',
+    extract: 'The Symbionese Liberation Army was a small American far-left militant organization.' },
+  { title: 'Service-level agreement', description: 'Commitment between a service provider and a client',
+    extract: 'A service-level agreement is a commitment between a service provider and a customer.' }
+];
+const SLA_EXPLANATION =
+  'SLA (Service Level Agreement) is a contract promising a minimum standard of service.';
+
+check('context ranking picks the intended sense',
+  rankByContext(SLA_CANDIDATES, SLA_EXPLANATION)[0].title, 'Service-level agreement');
+check('ranking keeps every candidate',
+  rankByContext(SLA_CANDIDATES, SLA_EXPLANATION).length, 2);
+check('no context leaves Wikipedia order alone',
+  rankByContext(SLA_CANDIDATES, '')[0].title, 'Symbionese Liberation Army');
+check('unrelated context leaves the order alone',
+  rankByContext(SLA_CANDIDATES, 'zzz qqq vvv')[0].title, 'Symbionese Liberation Army');
+
+// Search fallbacks must be real URLs, not model-invented ones.
+const links = searchLinks('SLA', 'en');
+check('fallback offers three search links', links.length, 3);
+check('every fallback link is a real https url',
+  links.every((l) => /^https:\/\/[\w.-]+\//.test(l.url) && l.url.includes('SLA')), true);
 
 /* ---------- right-click menu ---------- */
 

@@ -14,6 +14,7 @@ import { cacheGet, cacheSet, cacheClear, cacheStats } from './cache.js';
 import { cacheKey, hash } from '../common/hash.js';
 import { getRates, clearRates } from './rates.js';
 import { runAi, testApiKey } from './deepseek.js';
+import { lookup, searchLinks, wikiLang } from './wikipedia.js';
 
 /*
  * Right-click menu.
@@ -241,6 +242,30 @@ async function handle(msg) {
 
     case MSG.STYLESHEET:
       return { ok: true, css: await readStylesheet() };
+
+    case MSG.SOURCE: {
+      const settings = await getSettings();
+      const term = String(msg.term || '').trim();
+      if (!term) return { ok: false, error: 'Nothing to look up' };
+
+      const lang = wikiLang(msg.language || settings.language);
+      const context = String(msg.context || '');
+      // The context changes the ranking, so it belongs in the key.
+      const key = `wiki|${lang}|${hash(`${term.toLowerCase()}|${context}`)}`;
+      const ttl = 7 * 24 * 60 * 60 * 1000;
+
+      const hit = await cacheGet(key, ttl);
+      if (hit !== undefined) {
+        return { ok: true, articles: hit, cached: true, links: searchLinks(term, lang) };
+      }
+
+      // A definite answer is cached either way — a term with no article still
+      // has none tomorrow. A transport failure is not cached, or one rate-limit
+      // would leave this term answering "no source" for a week.
+      const articles = await lookup(term, lang, context);
+      await cacheSet(key, articles);
+      return { ok: true, articles, cached: false, links: searchLinks(term, lang) };
+    }
 
     default:
       return { ok: false, error: `Unknown message: ${msg?.type}` };
