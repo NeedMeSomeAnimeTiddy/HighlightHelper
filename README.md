@@ -61,7 +61,8 @@ There is no build step and no dependencies. Load the folder straight into Chrome
 3. Click **Load unpacked**
 4. Select this folder (the one containing `manifest.json`)
 
-Requires Chrome 111 or newer.
+Requires Chrome 111 or newer. Edge works and is verified. **Opera GX does not** — it blocks
+extension scripting at the browser level; see [Blocked by browser policy](#blocked-by-browser-policy).
 
 **After pulling changes, press the ↻ reload button** on the Highlight Helper card at
 `chrome://extensions`. Chrome does not pick up edits to an unpacked extension on its own, and
@@ -130,12 +131,16 @@ policy."* No extension can override it — not by injecting, not by permissions,
 manifest setting.
 
 That list can come from an enterprise or school policy, but Chromium-based browsers that
-aren't Chrome also ship **their own built-in lists**, so this can appear on an ordinary
-personal machine with no policies configured at all. Opera and Opera GX are the usual
-examples. Open `<browser>://policy` and look at **ExtensionSettings** to see the list and
-where it came from.
+aren't Chrome also ship **their own built-in lists**, so this appears on ordinary personal
+machines with no policies configured at all.
 
-If the site you want is on it, the only real fix is a browser that doesn't block it.
+**Opera GX is a confirmed case.** On a machine with no browser policy keys in the registry at
+all, Opera GX still refused to script the page; the error string comes from its own
+`opera_browser.dll`. Opera doesn't expose Chromium's `chrome://policy` page, so there is
+nothing to inspect and nothing to switch off. **The same unpacked build works in Edge**,
+which is the quickest way to tell a browser restriction apart from a bug in the extension.
+
+If the site you want is on the list, the only real fix is a browser that doesn't block it.
 
 One console note: service worker errors do **not** appear in the page console. They're at
 `chrome://extensions` → Highlight Helper → **service worker**. If the right-click menu does
