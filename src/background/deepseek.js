@@ -17,7 +17,7 @@ const TIMEOUT_MS = 30000;
  * Builds the system prompt + user message for an action.
  * Every prompt insists on a bare answer so the popup can show it verbatim.
  */
-function buildPrompt(action, text, options = {}) {
+export function buildPrompt(action, text, options = {}) {
   const lang = languageName(options.language || 'en');
 
   switch (action) {
@@ -155,7 +155,8 @@ function buildPrompt(action, text, options = {}) {
     }
 
     default:
-      throw new Error(`Unknown AI action: ${action}`);
+      // Almost always a version skew rather than a typo — see ERR.STALE_WORKER.
+      throw new Error(ERR.STALE_WORKER);
   }
 }
 

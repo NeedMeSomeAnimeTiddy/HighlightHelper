@@ -36,5 +36,15 @@ export const ERR = {
   NO_FUNDS: 'NO_FUNDS',
   RATE_LIMIT: 'RATE_LIMIT',
   OFFLINE: 'OFFLINE',
-  TIMEOUT: 'TIMEOUT'
+  TIMEOUT: 'TIMEOUT',
+  /**
+   * The page asked for an action the background script doesn't know.
+   *
+   * In practice this means the two halves are running different versions:
+   * content scripts are re-injected on every page load and pick up new code
+   * immediately, while the service worker keeps its old bundle until the
+   * extension is reloaded. So a new tool can appear in the menu before the
+   * worker can answer it.
+   */
+  STALE_WORKER: 'STALE_WORKER'
 };

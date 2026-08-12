@@ -72,6 +72,13 @@ Chrome stores them in your profile rather than reading them from the extension. 
 fingerprints the menu and rebuilds it whenever the fingerprint changes, so it heals itself —
 but the *new worker code* still has to be loaded first, which is what the reload does.
 
+**Why skipping the reload produces odd symptoms.** The two halves update on different
+schedules: content scripts are re-injected on every page load and pick up new files straight
+away, while the service worker keeps its old bundle until you reload the extension. So a new
+tool can appear in the menu while the worker has never heard of it. That combination now
+reports `STALE_WORKER` and the panel says to reload, rather than failing with something
+cryptic like "Unknown AI action".
+
 ## Add your DeepSeek API key
 
 Currency and unit conversion work immediately. The explain, translate, and rewrite tools
@@ -372,9 +379,10 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-213 assertions over number parsing, every detector's `matches()`, menu row construction,
-ordering, the QR encoder and its round trip, and the right-click menu's ids — including a
-block that pins down what the catch-all detectors must *not* claim. No framework, no
+217 assertions over number parsing, every detector's `matches()`, menu row construction,
+ordering, the QR encoder and its round trip, the right-click menu's ids, and that every AI
+action a menu row can send has a prompt waiting for it — including a block that pins down
+what the catch-all detectors must *not* claim. No framework, no
 dependencies. `package.json` exists only so Node treats the source as ES modules — Chrome
 never reads it.
 

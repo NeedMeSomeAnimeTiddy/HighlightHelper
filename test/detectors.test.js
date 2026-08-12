@@ -20,6 +20,8 @@ import numberbase from '../src/content/detectors/numberbase.js';
 import decode from '../src/content/detectors/decode.js';
 import texttools, { TRANSFORMS as TEXT_TRANSFORMS } from '../src/content/detectors/texttools.js';
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
+import { AI, ERR } from '../src/common/constants.js';
+import { buildPrompt } from '../src/background/deepseek.js';
 import summarize from '../src/content/detectors/summarize.js';
 import coords from '../src/content/detectors/coords.js';
 import regex from '../src/content/detectors/regex.js';
@@ -516,6 +518,35 @@ const allRows = [
 check('every row has a key', allRows.every((r) => typeof r.key === 'string' && r.key), true);
 check('keys are unique', new Set(allRows.map((r) => r.key)).size, allRows.length);
 check('every row has an icon', allRows.every((r) => typeof r.icon === 'string'), true);
+
+/* ---------- prompts ---------- */
+
+// Every action a detector can send must have a prompt on the other side. A tone
+// added to the menu without one fails only at the moment the user clicks it.
+const promptless = Object.entries(AI).filter(([, action]) => {
+  try {
+    const p = buildPrompt(action, 'Some text to work on.', { language: 'en' });
+    return !p?.system || !p.maxTokens;
+  } catch {
+    return true;
+  }
+});
+check('every AI action builds a prompt', promptless.map(([name]) => name), []);
+
+check('an unknown action reports a version skew, not a typo', (() => {
+  try { buildPrompt('not-a-real-action', 'x'); return null; }
+  catch (err) { return err.message; }
+})(), ERR.STALE_WORKER);
+
+// The actions the menu can actually reach, checked against the constants.
+const usedActions = [
+  ...REWRITE_TONES.map((t) => t.action),
+  AI.EXPLAIN, AI.TRANSLATE, AI.SUMMARIZE, AI.KEYPOINTS, AI.EXPLAIN_CODE, AI.COMMENT_CODE
+];
+check('every action a menu row sends is declared',
+  usedActions.filter((a) => !Object.values(AI).includes(a)), []);
+check('Continue writing sends a known action',
+  REWRITE_TONES.some((t) => t.action === AI.CONTINUE), true);
 
 /* ---------- right-click menu ---------- */
 

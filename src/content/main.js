@@ -362,14 +362,19 @@ const FRIENDLY = {
   [ERR.NO_FUNDS]: 'Your DeepSeek account is out of credit.',
   [ERR.RATE_LIMIT]: 'DeepSeek is rate-limiting right now. Try again in a moment.',
   [ERR.OFFLINE]: "Couldn't reach DeepSeek. Check your connection.",
-  [ERR.TIMEOUT]: 'That request timed out.'
+  [ERR.TIMEOUT]: 'That request timed out.',
+  [ERR.STALE_WORKER]:
+    'This tool is newer than the running background script. Open chrome://extensions ' +
+    'and press reload on Highlight Helper.'
 };
 
 function errorFor(err, retry) {
   const code = String(err?.message || err);
   const needsKey = code === ERR.NO_KEY || code === ERR.BAD_KEY;
+  // Retrying a stale worker just repeats the same failure.
+  const canRetry = !needsKey && code !== ERR.STALE_WORKER;
   return errorBox(FRIENDLY[code] || code, {
-    onRetry: needsKey ? null : retry,
+    onRetry: canRetry ? retry : null,
     onSettings: needsKey ? openOptions : null
   });
 }
