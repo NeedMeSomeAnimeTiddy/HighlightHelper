@@ -38,6 +38,7 @@ const DETECTOR_BLURB = {
   rewrite: 'Fix grammar, rewrite in another tone, or continue writing. Uses AI.',
   qr: 'Turns a link or short text into a scannable QR code. Local.',
   dictionary: 'Definitions and synonyms for a single word. Free — Wiktionary, no key.',
+  custom: 'Your own prompts, from the My tools card below. Uses AI.',
   highlight: 'Saves a highlight and paints it again on your next visit. Local, stored in this browser.',
   link: 'Copies a URL that scrolls to and highlights this exact text. Local.',
   search: 'Opens the selection in a search engine or reference site. Local.',
@@ -134,6 +135,129 @@ function wireDetectors() {
       return li;
     })
   );
+}
+
+/* ---------- custom tools ---------- */
+
+function renderCustomTools() {
+  const list = $('customTools');
+  const tools = settings.customTools || [];
+
+  if (!tools.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'None yet. A tool is a name and a prompt.';
+    list.replaceChildren(li);
+    return;
+  }
+
+  list.replaceChildren(...tools.map((tool) => {
+    const li = document.createElement('li');
+
+    const body = document.createElement('div');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = tool.name;
+    const prompt = document.createElement('p');
+    prompt.className = 'desc';
+    prompt.textContent = tool.prompt;
+    body.append(name, prompt);
+
+    const remove = document.createElement('button');
+    remove.className = 'ghost';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', async () => {
+      await persist({ customTools: (settings.customTools || []).filter((t) => t.id !== tool.id) });
+      renderCustomTools();
+    });
+
+    li.append(body, remove);
+    return li;
+  }));
+}
+
+function wireCustomTools() {
+  renderCustomTools();
+
+  $('addTool').addEventListener('click', async () => {
+    const name = $('toolName').value.trim();
+    const prompt = $('toolPrompt').value.trim();
+    const status = $('toolStatus');
+
+    if (!name || !prompt) {
+      flash(status, 'A tool needs both a name and a prompt.', 'bad');
+      return;
+    }
+
+    // Ids are generated, not derived from the name, so renaming a tool later
+    // cannot orphan the right-click entry that points at it.
+    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    await persist({ customTools: [...(settings.customTools || []), { id, name, prompt }] });
+
+    $('toolName').value = '';
+    $('toolPrompt').value = '';
+    flash(status, `Added ${name}. It is on the right-click menu too.`, 'ok');
+    renderCustomTools();
+  });
+}
+
+/* ---------- history ---------- */
+
+async function renderHistory() {
+  const list = $('historyList');
+  const res = await chrome.runtime.sendMessage({ type: MSG.HISTORY });
+  const entries = res?.ok ? res.entries : [];
+
+  if (!entries.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = settings.keepHistory === false
+      ? 'History is switched off.'
+      : 'Nothing yet.';
+    list.replaceChildren(li);
+    return;
+  }
+
+  list.replaceChildren(...entries.map((entry) => {
+    const li = document.createElement('li');
+    li.className = 'library-item';
+
+    const body = document.createElement('div');
+
+    const source = document.createElement('blockquote');
+    source.textContent = entry.source;
+    body.append(source);
+
+    const answer = document.createElement('p');
+    answer.className = 'library-note';
+    answer.textContent = entry.text;
+    body.append(answer);
+
+    const when = document.createElement('span');
+    when.className = 'desc';
+    when.textContent = `${entry.action} · ${new Date(entry.at).toLocaleString()}`;
+    body.append(when);
+
+    li.append(body);
+    return li;
+  }));
+}
+
+function wireHistory() {
+  $('keepHistory').checked = settings.keepHistory !== false;
+  $('keepHistory').addEventListener('change', async (e) => {
+    await persist({ keepHistory: e.target.checked });
+    renderHistory();
+  });
+
+  $('clearHistoryBtn').addEventListener('click', async () => {
+    const res = await chrome.runtime.sendMessage({ type: MSG.CLEAR_HISTORY });
+    flash($('historyStatus'), res?.ok ? `Cleared ${res.cleared}.` : 'Clear failed.',
+      res?.ok ? 'ok' : 'bad');
+    renderHistory();
+  });
+
+  renderHistory();
 }
 
 /* ---------- highlights library ---------- */
@@ -554,6 +678,8 @@ function renderSites() {
   wireDetectors();
   wireSearchEngines();
   wireHighlights();
+  wireCustomTools();
+  wireHistory();
   renderSites();
   wireCache();
   await wireApiKey();

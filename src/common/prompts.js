@@ -166,10 +166,41 @@ export function buildPrompt(action, text, options = {}) {
         temperature: 0.1
       };
 
+    case AI.CUSTOM: {
+      // The one prompt this file does not own. It is the user's, arriving in
+      // options, and the only thing added is the instruction every other prompt
+      // here also carries — answer with the answer, nothing around it.
+      const system = String(options.systemPrompt || '').trim();
+      if (!system) throw new Error('That tool has no prompt.');
+      return {
+        system: `${system}\n\nReply with the result only — no preamble and no explanation of what you did.`,
+        user: text,
+        maxTokens: Math.min(2000, Math.ceil(text.length / 2) + 400),
+        temperature: 0.4
+      };
+    }
+
     default:
       // Almost always a version skew rather than a typo — see ERR.STALE_WORKER.
       throw new Error(ERR.STALE_WORKER);
   }
+}
+
+/**
+ * Fills a user-written prompt template.
+ *
+ * `{text}` is deliberately *not* substituted: the selection travels as the user
+ * message, the same as for every built-in tool, so a template that says
+ * "translate this into Welsh" cannot have the selection spliced into the middle
+ * of its own instructions. Anything a page could put in front of the model
+ * stays in the turn where a model expects to find content, not in the sentence
+ * telling it what to do.
+ */
+export function fillTemplate(template, { title = '', url = '', language = 'en' } = {}) {
+  return String(template || '')
+    .replace(/\{title\}/g, title)
+    .replace(/\{url\}/g, url)
+    .replace(/\{lang\}/g, languageName(language));
 }
 
 /**

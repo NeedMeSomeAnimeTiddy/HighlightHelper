@@ -9,7 +9,7 @@
  * against what it replaced.
  */
 
-import { el, menu, asyncView, quote, actionRow, provenance } from '../kit.js';
+import { el, menu, streamView, quote, actionRow, provenance } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { wordCount, looksLikeLanguage, plural } from '../../common/text.js';
 import { isCode } from './codelang.js';
@@ -75,9 +75,10 @@ export default {
 };
 
 function resultView(text, tone, api) {
-  return asyncView(tone.busy, async () => {
-    const res = await api.ai(tone.action, text);
-    return tone.appends
+  return streamView(
+    tone.busy,
+    (emit) => api.ai(tone.action, text, {}, emit),
+    (res) => (tone.appends
       ? continueView(text, res, api)
       : el('div', {},
           el('div', { class: 'hh-label', text: `Was${provenance(res)}` }),
@@ -85,8 +86,9 @@ function resultView(text, tone, api) {
           el('div', { class: 'hh-label', text: tone.label }),
           el('div', { class: 'hh-text', text: res.text }),
           actionRow(res.text, api)
-        );
-  }, (err, retry) => api.errorFor(err, retry));
+        )),
+    (err, retry) => api.errorFor(err, retry)
+  );
 }
 
 /**

@@ -9,7 +9,8 @@
  * more annoying than a wrong hint in a prompt the model can ignore.
  */
 
-import { el, asyncView, actionRow, copyButton, topicSourceButton, provenanceNote } from '../kit.js';
+import { el, asyncView, streamView, actionRow, copyButton, topicSourceButton, provenanceNote, followUp }
+  from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode, guessLanguage } from './codelang.js';
 
@@ -36,20 +37,27 @@ export default {
         label: 'Explain this code',
         value: match.language || null,
         detailTitle: match.language ? `${match.language} code` : 'Code',
-        open: (api) => asyncView('Reading the code…', async () => {
-          const res = await api.ai(AI.EXPLAIN_CODE, text, { language: match.language });
-          const actions = el('div', { class: 'hh-row' }, copyButton(res.text, api));
-          const view = el('div', {},
-            el('div', { class: 'hh-text', text: res.text }),
-            actions,
-            provenanceNote(res)
-          );
-          // A snippet has no encyclopedia title, so the topics are derived from
-          // it first — see kit.topicSourceButton. The explanation goes along as
-          // ranking context, the same as it does for a plain term.
-          topicSourceButton(text, api, actions, { context: res.text });
-          return view;
-        }, (err, retry) => api.errorFor(err, retry))
+        open: (api) => streamView(
+          'Reading the code…',
+          (emit) => api.ai(AI.EXPLAIN_CODE, text, { language: match.language }, emit),
+          (res) => {
+            const actions = el('div', { class: 'hh-row' }, copyButton(res.text, api));
+            const view = el('div', {},
+              el('div', { class: 'hh-text', text: res.text }),
+              actions,
+              provenanceNote(res)
+            );
+            // A snippet has no encyclopedia title, so the topics are derived from
+            // it first — see kit.topicSourceButton. The explanation goes along as
+            // ranking context, the same as it does for a plain term.
+            topicSourceButton(text, api, actions, { context: res.text });
+            // "What does line 4 do?" is the obvious next question, and until now
+            // there was nowhere to put it.
+            followUp({ source: text, answer: res.text }, api, view);
+            return view;
+          },
+          (err, retry) => api.errorFor(err, retry)
+        )
       },
       {
         key: 'code:comment',

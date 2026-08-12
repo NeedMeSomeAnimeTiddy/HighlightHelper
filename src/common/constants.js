@@ -20,7 +20,26 @@ export const MSG = {
   DEFINE: 'hh:define',
   SYNONYMS: 'hh:synonyms',
   /** background -> content script: open the panel, optionally at one tool. */
-  RUN_TOOL: 'hh:run-tool'
+  RUN_TOOL: 'hh:run-tool',
+  /**
+   * A follow-up turn. Carries the whole conversation rather than one action,
+   * which is the only difference between this and MSG.AI.
+   */
+  CHAT: 'hh:chat',
+  /** Recent answers, for the history list on the options page. */
+  HISTORY: 'hh:history',
+  CLEAR_HISTORY: 'hh:clear-history'
+};
+
+/**
+ * Port name for a streamed answer.
+ *
+ * `chrome.runtime.sendMessage` resolves once, so it cannot deliver tokens as
+ * they arrive — a long summary sits behind a spinner for its whole duration
+ * even though the first sentence was ready almost immediately. A port can.
+ */
+export const PORT = {
+  AI: 'hh:ai-stream'
 };
 
 /** AI actions. Each maps to a prompt in src/background/deepseek.js. */
@@ -41,7 +60,12 @@ export const AI = {
    * search for — Wikipedia decides whether it exists, so an invented topic
    * comes back as "no article" rather than as a fake citation.
    */
-  TOPICS: 'topics'
+  TOPICS: 'topics',
+  /**
+   * A tool the user wrote themselves. The system prompt travels in `options`
+   * rather than living in prompts.js, because there is no fixed set of them.
+   */
+  CUSTOM: 'custom'
 };
 
 /**

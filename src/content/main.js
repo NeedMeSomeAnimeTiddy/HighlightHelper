@@ -14,12 +14,12 @@
  */
 
 import { getSettings, onSettingsChanged, isEnabledFor } from '../common/settings.js';
-import { MSG, ERR, PROVIDER } from '../common/constants.js';
+import { MSG, ERR, PROVIDER, PORT } from '../common/constants.js';
 import { TOOL_HINTS, toolFamily, detectorForTool } from '../common/tools.js';
 import { detect, getDetector } from './detectors/index.js';
 import { el, menu, glyph, errorBox, note } from './kit.js';
 import { markGlyph } from './icons.js';
-import { runLocal, isSupported as localSupported } from './local-ai.js';
+import { runLocal, chatLocal, isSupported as localSupported } from './local-ai.js';
 import { restore as restoreHighlights, watch as watchHighlights } from './highlights.js';
 
 const MIN_CHARS = 2;
@@ -299,6 +299,48 @@ async function send(message) {
   }
 }
 
+/**
+ * A streamed answer from the worker, over a port.
+ *
+ * `sendMessage` resolves once, so it cannot deliver tokens as they arrive.
+ * Disconnecting is what cancels the request, which matters: leaving a view
+ * while a long summary is still arriving should stop paying for it, and a
+ * disconnect is the only signal the worker gets that nobody is listening.
+ */
+function streamFromWorker(message, onChunk) {
+  return new Promise((resolve, reject) => {
+    let port;
+    try {
+      port = chrome.runtime.connect({ name: PORT.AI });
+    } catch {
+      reject(new Error('Extension was reloaded — refresh this page to continue.'));
+      return;
+    }
+
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      fn(value);
+      try { port.disconnect(); } catch { /* already gone */ }
+    };
+
+    port.onMessage.addListener((msg) => {
+      if (msg?.chunk != null) onChunk(msg.chunk);
+      else if (msg?.error) finish(reject, new Error(msg.error));
+      else if (msg?.done) finish(resolve, { ok: true, text: msg.text, cached: msg.cached });
+    });
+
+    // Fires when the worker finishes *or* when it dies mid-answer. Only the
+    // second is a failure, and `settled` is what tells them apart.
+    port.onDisconnect.addListener(() => {
+      finish(reject, new Error('The answer stopped partway through.'));
+    });
+
+    port.postMessage(message);
+  });
+}
+
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -427,14 +469,17 @@ function makeApi(extra = {}) {
      * otherwise — and an on-device model that can't serve this particular
      * action is not an error, it's a fall-through.
      */
-    async ai(action, text, options = {}) {
+    async ai(action, text, options = {}, onChunk = null) {
       const merged = { language: settings.language, ...options };
       const provider = settings.aiProvider || PROVIDER.AUTO;
       const pinnedLocal = provider === PROVIDER.LOCAL;
 
       if (provider !== PROVIDER.CLOUD && localSupported()) {
         try {
-          const local = await runLocal(action, text, merged, { cacheDays: settings.cacheDays });
+          const local = await runLocal(action, text, merged, {
+            cacheDays: settings.cacheDays,
+            onChunk
+          });
           if (local) return { ok: true, ...local };
         } catch (err) {
           // Pinned to local means "don't send my text anywhere", so a failure
@@ -446,7 +491,36 @@ function makeApi(extra = {}) {
 
       if (pinnedLocal) throw new Error(ERR.NO_LOCAL_MODEL);
 
+      if (onChunk) return streamFromWorker({ type: MSG.AI, action, text, options: merged }, onChunk);
+
       const res = await send({ type: MSG.AI, action, text, options: merged });
+      if (!res?.ok) throw new Error(res?.error || 'Request failed');
+      return res;
+    },
+
+    /**
+     * A follow-up turn. `messages` is the whole conversation, ending with the
+     * new question.
+     */
+    async chat(messages, onChunk = null) {
+      const provider = settings.aiProvider || PROVIDER.AUTO;
+      const pinnedLocal = provider === PROVIDER.LOCAL;
+
+      if (provider !== PROVIDER.CLOUD && localSupported()) {
+        try {
+          const out = await chatLocal(messages, onChunk);
+          if (out) return { ok: true, text: out, local: true };
+        } catch (err) {
+          if (pinnedLocal) throw err;
+          console.warn('[Highlight Helper] on-device follow-up failed, using DeepSeek:', err);
+        }
+      }
+
+      if (pinnedLocal) throw new Error(ERR.NO_LOCAL_MODEL);
+
+      if (onChunk) return streamFromWorker({ type: MSG.CHAT, messages }, onChunk);
+
+      const res = await send({ type: MSG.CHAT, messages });
       if (!res?.ok) throw new Error(res?.error || 'Request failed');
       return res;
     },

@@ -358,6 +358,117 @@ function noArticle(term, links = []) {
 }
 
 /**
+ * Like asyncView, but the answer appears as it is written.
+ *
+ * `run(emit)` is called with a function that takes the text so far. The spinner
+ * is replaced by the first token rather than by the finished answer, which for
+ * a long summary is the difference between four seconds of nothing and reading
+ * along as it arrives. `finish(result)` then returns the real view.
+ *
+ * The emitted text is deliberately not tidied on the way past: `cleanOutput`
+ * strips wrapping quotes and fences, and it cannot tell an opening fence from a
+ * complete one until the answer ends. Better a fence visible for a moment than
+ * text that flickers as the stripping changes its mind.
+ */
+export function streamView(loadingLabel, run, finish, onError) {
+  const box = el('div', { class: 'hh-detail' });
+
+  const go = () => {
+    replaceContent(box, spinner(loadingLabel));
+    const live = el('div', { class: 'hh-text hh-streaming' });
+    let started = false;
+
+    const emit = (text) => {
+      if (!started) {
+        started = true;
+        replaceContent(box, live);
+      }
+      live.textContent = text;
+    };
+
+    Promise.resolve()
+      .then(() => run(emit))
+      .then((result) => replaceContent(box, finish(result)))
+      .catch((err) => replaceContent(box, onError(err, go)));
+  };
+
+  go();
+  return box;
+}
+
+/**
+ * "Ask a follow-up" under a result.
+ *
+ * Every AI answer used to be a dead end — you read it and the conversation
+ * stopped, which is the one thing every sidebar competitor does that this
+ * didn't. The original selection and the answer become the first two turns, so
+ * "why?" means what it looks like it means.
+ *
+ * Follow-ups are not cached. Every other call is keyed on an exact selection
+ * and action, so repeating one is genuinely the same request; a follow-up
+ * depends on everything said before it.
+ */
+export function followUp({ system, source, answer }, api, host) {
+  const messages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    { role: 'user', content: source },
+    { role: 'assistant', content: answer }
+  ];
+
+  const thread = el('div', { class: 'hh-thread' });
+  const input = el('input', {
+    class: 'hh-ask',
+    type: 'text',
+    placeholder: 'Ask a follow-up…',
+    'aria-label': 'Ask a follow-up'
+  });
+
+  const ask = async () => {
+    const question = input.value.trim();
+    if (!question) return;
+
+    input.value = '';
+    input.disabled = true;
+
+    thread.append(el('div', { class: 'hh-turn hh-turn--you' }, el('span', { text: question })));
+    const reply = el('div', { class: 'hh-turn' }, el('span', { class: 'hh-dots', 'aria-label': 'Thinking' }));
+    thread.append(reply);
+    api.resize?.();
+
+    messages.push({ role: 'user', content: question });
+
+    try {
+      const res = await api.chat(messages, (text) => {
+        reply.replaceChildren(document.createTextNode(text));
+        api.resize?.();
+      });
+      reply.replaceChildren(document.createTextNode(res.text));
+      messages.push({ role: 'assistant', content: res.text });
+    } catch (err) {
+      reply.replaceChildren(
+        glyph('warn', 'hh-glyph hh-glyph--warn'),
+        document.createTextNode(String(err?.message || err))
+      );
+      // A failed turn must come off the conversation, or the next question
+      // carries a question nobody answered and the model tries to answer both.
+      messages.pop();
+    } finally {
+      input.disabled = false;
+      api.resize?.();
+    }
+  };
+
+  // The panel captures arrow keys for menu navigation; a text field needs them.
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') ask();
+  });
+
+  host.append(thread, el('div', { class: 'hh-row' }, input, btn('Ask', ask, { variant: 'hh-primary' })));
+  return thread;
+}
+
+/**
  * Runs `producer` into a fresh container: spinner, then result or error.
  * Returns the container synchronously so it can be pushed as a view.
  */

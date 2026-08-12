@@ -42,6 +42,7 @@ export const DEFAULTS = {
     summarize: true,
     rewrite: true,
     qr: true,
+    custom: true,
     highlight: true,
     link: true,
     search: true,
@@ -58,6 +59,18 @@ export const DEFAULTS = {
    */
   searchEngines: [],
   searchEnabled: ['google', 'ddg', 'wikipedia', 'youtube'],
+
+  /**
+   * Tools the user wrote: [{ id, name, prompt }].
+   *
+   * PopClip's actual model — don't ship 250 actions, ship the ability to write
+   * the 251st — and the cheapest possible answer to every "could it also…".
+   * Each becomes a menu row and a right-click entry.
+   */
+  customTools: [],
+
+  /** Whether recent answers are kept for the history list. */
+  keepHistory: true,
 
   /** Master switch + per-origin opt-outs (hostnames). */
   enabled: true,

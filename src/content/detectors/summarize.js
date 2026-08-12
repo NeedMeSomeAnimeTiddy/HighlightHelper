@@ -8,7 +8,7 @@
  * Both cost a DeepSeek call, so nothing runs until a row is picked.
  */
 
-import { el, asyncView, actionRow, topicSourceButton, provenance } from '../kit.js';
+import { el, streamView, actionRow, topicSourceButton, provenance, followUp } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode } from './codelang.js';
 
@@ -49,18 +49,25 @@ export default {
 };
 
 function run(text, action, busy, label, api) {
-  return asyncView(busy, async () => {
-    const res = await api.ai(action, text);
-    const actions = actionRow(res.text, api);
-    const view = el('div', {},
-      el('div', { class: 'hh-label', text: `${label}${provenance(res)}` }),
-      el('div', { class: 'hh-text', text: res.text }),
-      actions
-    );
-    // A paragraph has no encyclopedia title. The topics are derived from the
-    // original text rather than the summary, so nothing the model introduced
-    // while condensing can become a search term of its own.
-    topicSourceButton(text, api, actions, { context: res.text });
-    return view;
-  }, (err, retry) => api.errorFor(err, retry));
+  // Summaries are the longest thing this extension produces, so they stream —
+  // the first sentence is readable while the rest is still being written.
+  return streamView(
+    busy,
+    (emit) => api.ai(action, text, {}, emit),
+    (res) => {
+      const actions = actionRow(res.text, api);
+      const view = el('div', {},
+        el('div', { class: 'hh-label', text: `${label}${provenance(res)}` }),
+        el('div', { class: 'hh-text', text: res.text }),
+        actions
+      );
+      // A paragraph has no encyclopedia title. The topics are derived from the
+      // original text rather than the summary, so nothing the model introduced
+      // while condensing can become a search term of its own.
+      topicSourceButton(text, api, actions, { context: res.text });
+      followUp({ source: text, answer: res.text }, api, view);
+      return view;
+    },
+    (err, retry) => api.errorFor(err, retry)
+  );
 }

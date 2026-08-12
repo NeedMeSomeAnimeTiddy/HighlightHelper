@@ -391,6 +391,74 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * A caret while text is still arriving.
+ *
+ * It is what tells a slow answer apart from a stalled one — without it, a
+ * pause between tokens looks exactly like a failure. Pinned to the end of the
+ * text rather than floating, so it moves as the answer grows.
+ */
+.hh-streaming::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--hh-accent);
+  animation: hh-blink 1s steps(2, start) infinite;
+}
+
+@keyframes hh-blink {
+  to { visibility: hidden; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still visible, just not flashing — it is a status, not decoration. */
+  .hh-streaming::after { animation: none; }
+}
+
+/* Follow-up conversation under a result. */
+.hh-thread:not(:empty) {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hh-border);
+}
+
+.hh-turn {
+  margin-bottom: 7px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The user's own turns sit in from the margin, dimmer — they are the question. */
+.hh-turn--you {
+  padding-left: 9px;
+  border-left: 2px solid var(--hh-border);
+  color: var(--hh-muted);
+}
+
+.hh-ask {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--hh-border);
+  border-radius: 6px;
+  background: var(--hh-hover);
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.hh-ask:focus {
+  outline: 2px solid var(--hh-accent);
+  outline-offset: -1px;
+}
+
+.hh-ask:disabled { opacity: 0.6; }
+
 /* Highlight colours. Circles rather than squares so they read as ink, not UI. */
 .hh-swatches {
   gap: 8px;

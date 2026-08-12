@@ -40,7 +40,7 @@
 import { AI } from '../common/constants.js';
 import { buildPrompt, cleanOutput } from '../common/prompts.js';
 import { cacheGet, cacheSet } from '../common/cache.js';
-import { cacheKey } from '../common/hash.js';
+import { cacheKey, hash } from '../common/hash.js';
 
 /**
  * Every availability() call is raced against this.
@@ -136,7 +136,7 @@ async function ready(global, args) {
  * the summary in the same language as the original — which is what omitting it
  * gets. A hard failure on a French page would be a worse trade than a default.
  */
-async function runSummarizer(action, text) {
+async function runSummarizer(action, text, onChunk) {
   if (text.length > MAX_SUMMARY_CHARS) return null;
   if (!(await ready('Summarizer'))) return null;
 
@@ -147,11 +147,28 @@ async function runSummarizer(action, text) {
   });
 
   try {
-    const out = await summarizer.summarize(text);
+    const out = onChunk
+      ? await drain(summarizer.summarizeStreaming(text), onChunk)
+      : await summarizer.summarize(text);
     return action === AI.KEYPOINTS ? bulletsToPanelStyle(out) : cleanOutput(out);
   } finally {
     summarizer.destroy?.();
   }
+}
+
+/**
+ * Reads one of the built-in APIs' streams to the end.
+ *
+ * They yield the *delta*, unlike the panel's callback, which wants the text so
+ * far — so the accumulation happens once, here, rather than in each caller.
+ */
+async function drain(stream, onChunk) {
+  let text = '';
+  for await (const piece of stream) {
+    text += piece;
+    onChunk(text);
+  }
+  return text;
 }
 
 /**
@@ -219,7 +236,7 @@ async function detectLanguage(text) {
  * what it is depending on who answered. The system prompt becomes the session's
  * initial prompt and the selection becomes the turn.
  */
-async function runModel(action, text, options) {
+async function runModel(action, text, options, onChunk) {
   if (text.length > MAX_MODEL_CHARS) return null;
   if (!(await ready('LanguageModel'))) return null;
 
@@ -235,7 +252,47 @@ async function runModel(action, text, options) {
   });
 
   try {
-    return cleanOutput(await session.prompt(prompt.user));
+    const out = onChunk
+      ? await drain(session.promptStreaming(prompt.user), onChunk)
+      : await session.prompt(prompt.user);
+    return cleanOutput(out);
+  } finally {
+    session.destroy?.();
+  }
+}
+
+/**
+ * A follow-up turn, on-device.
+ *
+ * The conversation is replayed as the session's initial prompts rather than a
+ * session being kept alive between turns. Holding one open across a panel that
+ * may be closed and reopened, on a page that may navigate, is a lifetime
+ * problem in exchange for saving a few hundred milliseconds of context replay.
+ *
+ * Returns null when it can't serve it, same contract as everything else here.
+ */
+export async function chatLocal(messages, onChunk) {
+  if (!has('LanguageModel')) return null;
+  if (!messages?.length) return null;
+
+  const total = messages.reduce((n, m) => n + (m.content?.length || 0), 0);
+  if (total > MAX_MODEL_CHARS) return null;
+  if (!(await ready('LanguageModel'))) return null;
+
+  const history = messages.slice(0, -1);
+  const last = messages[messages.length - 1];
+
+  const session = await LanguageModel.create({
+    initialPrompts: history.map((m) => ({ role: m.role, content: m.content })),
+    temperature: 0.5,
+    topK: 3
+  });
+
+  try {
+    const out = onChunk
+      ? await drain(session.promptStreaming(last.content), onChunk)
+      : await session.prompt(last.content);
+    return cleanOutput(out);
   } finally {
     session.destroy?.();
   }
@@ -251,7 +308,7 @@ async function runModel(action, text, options) {
  * Returns { text, cached } when it could, null when it could not. Throws only
  * on a real failure — a session that was created and then died.
  */
-export async function runLocal(action, text, options = {}, { cacheDays = 7 } = {}) {
+export async function runLocal(action, text, options = {}, { cacheDays = 7, onChunk = null } = {}) {
   if (!isSupported()) return null;
 
   const trimmed = (text || '').trim();
@@ -266,7 +323,10 @@ export async function runLocal(action, text, options = {}, { cacheDays = 7 } = {
       : {}),
     ...(action === AI.EXPLAIN_CODE || action === AI.COMMENT_CODE
       ? { codeLanguage: options.language || '' }
-      : {})
+      : {}),
+    // Matches the worker's key exactly: two custom tools pointed at the same
+    // selection are two different questions.
+    ...(action === AI.CUSTOM ? { tool: hash(options.systemPrompt || '') } : {})
   });
   const ttl = Math.max(0, cacheDays) * 24 * 60 * 60 * 1000;
 
@@ -274,9 +334,9 @@ export async function runLocal(action, text, options = {}, { cacheDays = 7 } = {
   if (hit !== undefined) return { text: hit, cached: true, local: true };
 
   let out;
-  if (SUMMARY_ACTIONS.has(action)) out = await runSummarizer(action, trimmed);
+  if (SUMMARY_ACTIONS.has(action)) out = await runSummarizer(action, trimmed, onChunk);
   else if (action === AI.TRANSLATE) out = await runTranslator(trimmed, options.language);
-  else out = await runModel(action, trimmed, options);
+  else out = await runModel(action, trimmed, options, onChunk);
 
   // An empty answer is a failed answer. Better to let DeepSeek try than to show
   // a blank panel and call it a result.

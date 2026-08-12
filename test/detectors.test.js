@@ -26,6 +26,7 @@ import texttools, {
 } from '../src/content/detectors/texttools.js';
 import dictionary from '../src/content/detectors/dictionary.js';
 import search from '../src/content/detectors/search.js';
+import custom from '../src/content/detectors/custom.js';
 import { buildTextFragment, occurrences, normalise, encodePart }
   from '../src/content/anchor.js';
 import { searchUrlFor, resolveEngines } from '../src/common/searchengines.js';
@@ -35,7 +36,7 @@ import { pageKey, hostKey, toMarkdown } from '../src/common/highlights-store.js'
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import { AI, ERR } from '../src/common/constants.js';
 import { parseTopics } from '../src/common/text.js';
-import { buildPrompt, cleanOutput } from '../src/common/prompts.js';
+import { buildPrompt, cleanOutput, fillTemplate } from '../src/common/prompts.js';
 import { runLocal, isSupported as localSupported, bulletsToPanelStyle }
   from '../src/content/local-ai.js';
 import { provenance } from '../src/content/kit.js';
@@ -566,13 +567,29 @@ check('every row has an icon', allRows.every((r) => typeof r.icon === 'string'),
 // added to the menu without one fails only at the moment the user clicks it.
 const promptless = Object.entries(AI).filter(([, action]) => {
   try {
-    const p = buildPrompt(action, 'Some text to work on.', { language: 'en' });
+    // CUSTOM is the one action whose prompt is not in prompts.js — it is the
+    // user's, and arrives in options. Everything else must be self-contained.
+    const p = buildPrompt(action, 'Some text to work on.', {
+      language: 'en',
+      ...(action === AI.CUSTOM ? { systemPrompt: 'Do the thing.' } : {})
+    });
     return !p?.system || !p.maxTokens;
   } catch {
     return true;
   }
 });
 check('every AI action builds a prompt', promptless.map(([name]) => name), []);
+
+check('a custom tool with no prompt is refused rather than sent empty', (() => {
+  try { buildPrompt(AI.CUSTOM, 'x', {}); return null; }
+  catch (err) { return err.message; }
+})(), 'That tool has no prompt.');
+
+// The selection travels as the user turn, never spliced into the instructions.
+check('a template fills context but never the selection',
+  fillTemplate('Rewrite for {title} in {lang}. Ignore {text}.',
+    { title: 'My Page', language: 'fr' }),
+  'Rewrite for My Page in French. Ignore {text}.');
 
 check('an unknown action reports a version skew, not a typo', (() => {
   try { buildPrompt('not-a-real-action', 'x'); return null; }
@@ -845,6 +862,77 @@ check('export orders by when they were made',
 check('markdown control characters in a title are escaped',
   toMarkdown([{ host: 'e.com', items: [{ id: '1', url: 'https://e.com/', title: 'A [b] *c*', text: 'x', createdAt: 1 }] }])
     .includes('A \\[b\\] \\*c\\*'), true);
+
+/* ---------- custom tools ---------- */
+
+const TOOLS = [{ id: 't1', name: 'Explain simply', prompt: 'Explain plainly in {lang}.' }];
+
+check('no tools means no row', custom.matches('some ordinary prose here', S()), null);
+check('a half-written tool is not offered',
+  custom.matches('some prose', S({ customTools: [{ id: 'x', name: 'No prompt' }] })), null);
+check('a tool matches ordinary prose',
+  custom.matches('some ordinary prose here', S({ customTools: TOOLS }))?.tools.length, 1);
+// Same gate as every other shape-matched tool.
+check('custom tools stay off a hex colour',
+  custom.matches('#3f8ae0', S({ customTools: TOOLS })), null);
+
+const oneTool = custom.items({
+  text: 'some ordinary prose here',
+  match: { tools: TOOLS },
+  settings: S({ customTools: TOOLS }),
+  api: { context: { title: 'T', url: 'https://e.com' } }
+});
+check('one tool is a row, not a submenu', [oneTool.length, oneTool[0].key, oneTool[0].label],
+  [1, 'custom:t1', 'Explain simply']);
+
+const twoTools = [...TOOLS, { id: 't2', name: 'To Spanish', prompt: 'Translate to Spanish.' }];
+const grouped = custom.items({
+  text: 'some ordinary prose here',
+  match: { tools: twoTools },
+  settings: S({ customTools: twoTools }),
+  api: { context: {} }
+});
+check('several tools collapse into one drill-in row',
+  [grouped.length, grouped[0].key, grouped[0].value], [1, 'custom', '2']);
+
+/* ---------- history ---------- */
+
+// chrome.storage is not here, so the store gets a minimal stand-in. What is
+// being checked is the shape of the record and the de-duplication, not storage.
+globalThis.chrome ??= {};
+chrome.storage ??= (() => {
+  const data = {};
+  return {
+    local: {
+      get: async (k) => ({ [k]: data[k] }),
+      set: async (patch) => Object.assign(data, patch)
+    }
+  };
+})();
+
+const { remember, readHistory, clearHistory } = await import('../src/common/history.js');
+
+await remember({ action: 'explain', source: 'SLA', text: 'A service-level agreement.' });
+await remember({ action: 'explain', source: 'CDN', text: 'A content delivery network.' });
+check('history is newest first', (await readHistory()).map((h) => h.source), ['CDN', 'SLA']);
+
+// Re-running a tool on the same selection is the commonest thing there is; a
+// history that was ninety percent one repeated lookup would be useless.
+await remember({ action: 'explain', source: 'SLA', text: 'An updated answer.' });
+const afterRepeat = await readHistory();
+check('repeating a lookup moves it rather than duplicating it',
+  [afterRepeat.length, afterRepeat[0].source, afterRepeat[0].text],
+  [2, 'SLA', 'An updated answer.']);
+
+// The same text under a different tool is a different question.
+await remember({ action: 'summarize', source: 'SLA', text: 'Something else.' });
+check('a different action on the same text is its own entry', (await readHistory()).length, 3);
+
+await remember({ action: 'explain', source: '   ', text: 'nothing to record' });
+check('an empty selection is not recorded', (await readHistory()).length, 3);
+
+check('clearing reports what it removed', await clearHistory(), 3);
+check('and leaves nothing behind', (await readHistory()).length, 0);
 
 /* ---------- providers ---------- */
 

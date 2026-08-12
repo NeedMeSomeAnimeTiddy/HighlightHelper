@@ -8,7 +8,7 @@
  * Costs a DeepSeek call, so nothing happens until the row is picked.
  */
 
-import { el, asyncView, copyButton, sourceButton, provenanceNote } from '../kit.js';
+import { el, asyncView, copyButton, sourceButton, provenanceNote, followUp } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { letterRatio } from '../../common/text.js';
 
@@ -75,6 +75,7 @@ export default {
         // explanation goes along as context: it describes the sense meant, and
         // "SLA" alone finds the Symbionese Liberation Army first.
         sourceButton(match.term, ctx, actions, { context: res.text });
+        followUp({ source: match.term, answer: res.text }, ctx, view);
         return view;
       }, (err, retry) => ctx.errorFor(err, retry))
     }];

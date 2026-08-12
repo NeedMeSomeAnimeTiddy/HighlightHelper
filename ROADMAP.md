@@ -252,7 +252,28 @@ this extension worth trusting.
 
 ---
 
-## Phase 4 — Conversation
+## Phase 4 — Conversation ✅ built
+
+*Shipped. Streaming over a port, follow-up questions under every AI result, user-written
+tools, and a history of recent answers.*
+
+**What differed from the plan.** Very little structurally — the ordering held. Two things
+worth recording:
+
+- Custom tools forced the context-menu fingerprint to become *computed* rather than a
+  module constant, since adding a tool has to change the menu and nothing else would notice.
+  `onSettingsChanged` now rebuilds it, and the existing fingerprint makes that a no-op when
+  nothing changed.
+- The custom-tool detector was written with a looser prose gate than the other catch-alls
+  (0.4 rather than 0.45), which let `#3f8ae0` through by a single character. The
+  catch-all test block caught it, for the third phase running.
+
+**Prompt injection got a real answer.** `fillTemplate` fills `{title}`, `{url}` and `{lang}`
+but deliberately not `{text}`: the selection stays in the user turn rather than being spliced
+into the instructions, so a page cannot write the sentence telling the model what to do.
+
+**Still unverified:** everything in this phase. Streaming has never run against a real SSE
+response, no follow-up has been sent, and no custom tool has been executed.
 
 Three changes that only make sense in order.
 

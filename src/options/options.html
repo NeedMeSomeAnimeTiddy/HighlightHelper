@@ -122,6 +122,52 @@
     </section>
 
     <section class="card">
+      <h2>My tools</h2>
+      <p class="hint">
+        Your own prompts, each becoming a menu row and a right-click entry. Use
+        <code>{title}</code>, <code>{url}</code> and <code>{lang}</code> for the page's title,
+        its address and your language. The selected text is sent separately — you don't need
+        to mention it, and it is never spliced into your instructions.
+      </p>
+
+      <ul class="tools" id="customTools"></ul>
+
+      <div class="field">
+        <label for="toolName">Add a tool</label>
+        <input id="toolName" type="text" spellcheck="false" placeholder="Explain like I'm five">
+        <textarea id="toolPrompt" rows="3"
+                  placeholder="Rewrite the text so a bright ten-year-old would understand it. Answer in {lang}."></textarea>
+        <div class="row">
+          <button id="addTool" type="button">Add tool</button>
+          <span id="toolStatus" class="status" role="status"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Recent answers</h2>
+      <p class="hint">
+        The last sixty things you asked for, kept in this browser so you can find one again.
+        This is a record of what you highlighted while browsing — it never syncs, and it is
+        one button to clear.
+      </p>
+
+      <div class="field">
+        <label class="check">
+          <input id="keepHistory" type="checkbox">
+          <span>Keep a history</span>
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="clearHistoryBtn" type="button" class="ghost">Clear history</button>
+        <span id="historyStatus" class="status" role="status"></span>
+      </div>
+
+      <ul class="library" id="historyList"></ul>
+    </section>
+
+    <section class="card">
       <h2>Highlights</h2>
       <p class="hint">
         Everything you have highlighted, grouped by page. Saved in this browser only — no

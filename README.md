@@ -35,6 +35,7 @@ selection actually is:
 | Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
 | A paragraph or more | *Summarise* and *Key points*, both with **Find a source** | Yes, when you pick the row |
 | A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual / Continue writing, each with **Copy** and **Replace** | Yes, when you pick a tone |
+| Anything, with a tool you wrote | *My tools* → your own prompt, run on the selection | Yes, when you pick the row |
 | Any prose | *Highlight this* → four colours and a note; it comes back on your next visit | No — local |
 | A single word | *Define* → part of speech, senses and examples from Wiktionary, plus **Say it** and **Synonyms** | No — keyless API |
 | Any prose | *Link to this text* → a `#:~:text=` URL that scrolls to and highlights exactly this | No — local |
@@ -42,10 +43,10 @@ selection actually is:
 | Any prose | *Read aloud* → the browser's own voice | No — local |
 | Any text | *Text tools* → counts and reading time; UPPER / lower / Title / Sentence / camel / Pascal / snake / kebab / slug; sort, reverse, dedupe and join lines; every email, link or number in the selection; SHA-256 | No — local |
 
-Seventeen of the twenty-one tools never touch the network. Each can be switched
+Seventeen of the twenty-two tools never touch the network. Each can be switched
 off individually in settings.
 
-The other four need a model, and there are two ways to get one. Chrome can run
+The other five need a model, and there are two ways to get one. Chrome can run
 **Gemini Nano on your machine** — no key, no cost, and the selection never leaves
 the computer — and there is **DeepSeek** for when it can't. Out of the box the
 extension uses the on-device model where it can and falls back, so the "Yes"
@@ -59,6 +60,10 @@ paragraph with only its ending would be wrong.
 
 Free tools resolve up front, so the menu often answers before you click anything. Anything
 that costs money waits for you to pick its row — that click is the consent.
+
+Long answers **stream**, so you read along as they arrive rather than watching a spinner, and
+every AI result takes a **follow-up question** underneath it: *"why?"*, *"shorter"*, *"what
+does line 4 do?"*.
 
 Every tool is also on the right-click menu, under **Highlight Helper** — see below.
 
@@ -212,6 +217,8 @@ Everything below lives in `chrome.storage.sync` except the API key.
 - **My language** — translations and explanations come back in this language, and text that
   looks like it's in a *different* language pushes the Translate tab to the front
 - **Highlights** — the whole library, grouped by page, with delete and Markdown export
+- **My tools** — your own prompts, each becoming a menu row and a right-click entry
+- **Recent answers** — the history list, with a switch to stop keeping one
 - **Tools** — turn individual detectors off
 - **Search with…** — which sites the search row offers, plus your own; an entry is a name
   and a URL with `{q}` where the selection goes
@@ -292,6 +299,46 @@ Three things worth knowing:
 If the content script isn't running on the page at all, the worker injects it and retries
 once — that's what the `scripting` permission is for. Some targets can never be reached
 whatever we do: Chrome's PDF viewer, `chrome://` pages, and the Web Store.
+
+## Your own tools
+
+Twenty-one built-in tools will always be missing the one you need. So **My tools** on the
+options page takes a name and a prompt, and each becomes a menu row and a right-click entry:
+
+> **Explain like I'm five** — *Rewrite the text so a bright ten-year-old would understand it.
+> Answer in {lang}.*
+
+`{title}`, `{url}` and `{lang}` are filled in from the page. `{text}` deliberately is **not**.
+The selection travels as the user turn, the same as for every built-in tool, so a template
+cannot have page content spliced into the middle of its own instructions — anything a website
+could put in front of the model stays in the turn where a model expects to find content, not
+in the sentence telling it what to do.
+
+One tool is a row. Several collapse into a *My tools* drill-in, so six of them don't push the
+detector that actually recognised something below the fold.
+
+## Follow-up questions
+
+Every AI answer used to be a dead end: you read it and the conversation stopped. Now there is
+an **Ask a follow-up** box under each one, with the original selection and the answer already
+in the conversation, so *"why?"* means what it looks like it means.
+
+Follow-ups are **not cached**. Every other call is keyed on an exact selection and action, so
+repeating one is genuinely the same request; a follow-up depends on everything said before
+it, and a cache keyed loosely enough to hit would sometimes answer the wrong question.
+
+A failed turn is removed from the conversation rather than left in it — otherwise the next
+question carries a question nobody answered, and the model tries to answer both.
+
+## Recent answers
+
+The last sixty things you asked for, on the options page, so you can find one again after
+closing the tab. Re-running a tool on the same selection replaces its earlier entry rather
+than stacking, since that is the commonest thing there is.
+
+This is a record of what you highlighted while browsing, which is about as personal as
+anything here touches — so it is capped, it never syncs, it is one button to clear, and it
+can be switched off entirely.
 
 ## Highlights
 
@@ -425,6 +472,7 @@ src/
     text.js                   "is this actually prose?" helpers
     hash.js                   FNV-1a + cache key builder
     prompts.js                the prompts, shared by both providers
+    history.js                the last few answers
     cache.js                  TTL + LRU cache over chrome.storage.local
     searchengines.js          the "Search with…" defaults and URL templating
     highlights-store.js       saved highlights, per origin, + Markdown export
@@ -452,7 +500,7 @@ src/
       numberbase.js  regex.js  unit.js  code.js  decode.js
       translate.js  jargon.js  summarize.js  rewrite.js  qr.js
       dictionary.js  highlight.js  link.js  search.js  speak.js
-      texttools.js
+      custom.js  texttools.js
       langdetect.js           small script/stopword language guesser
       codelang.js             "is this code, and which language?"
   options/                    options page
@@ -590,6 +638,30 @@ with a phone is the check that closes that gap.
 **Where the network lives.** Only the service worker. Content scripts send messages; they
 never hold the API key and never call `fetch` against DeepSeek.
 
+**Why streaming needs a port and not a message.** `chrome.runtime.sendMessage` resolves once,
+so it cannot deliver tokens as they arrive — a long summary sits behind a spinner for its
+whole duration even though the first sentence was ready almost immediately. So the AI path
+uses `chrome.runtime.connect`, one port per request. Disconnecting is also the cancel signal:
+leaving a view while an answer is still arriving should stop paying for it, and a disconnect
+is the only notification a worker gets that nobody is listening any more.
+
+The SSE reader carries the tail of each network read forward rather than parsing it. Splitting
+on newlines and hoping works until a token straddles a packet boundary, at which point it
+drops a word in the middle of a paragraph — the kind of failure nobody reports, because it
+reads like the model wrote it.
+
+Streamed text is deliberately **not** tidied on the way past. `cleanOutput` strips wrapping
+quotes and fences, and it cannot tell an opening fence from a complete one until the answer
+ends; better a fence visible for a moment than text that flickers as the stripping changes its
+mind. The cleaned version replaces it when the stream finishes.
+
+**Why a custom tool's prompt never contains the selection.** `fillTemplate` substitutes
+`{title}`, `{url}` and `{lang}` — and not `{text}`. The selection travels as the user turn,
+the same as for every built-in tool. A template that interpolated page content into its own
+instructions would put whatever a website chose to say in the sentence telling the model what
+to do; keeping it in the turn where a model expects to find content is the difference between
+data and instructions.
+
 **Why the on-device model is the exception to that.** The rule exists because the worker owns
 the API key. There is no secret in a local model, so the argument doesn't apply — and the
 Prompt API is unavailable in worker contexts, so the worker couldn't run it regardless. The
@@ -698,7 +770,7 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-282 assertions over number parsing, every detector's `matches()`, menu row construction,
+306 assertions over number parsing, every detector's `matches()`, menu row construction,
 ordering, the QR encoder and its round trip, the right-click menu's ids, and that every AI
 action a menu row can send has a prompt waiting for it — including a block that pins down
 what the catch-all detectors must *not* claim. No framework, no
@@ -827,3 +899,15 @@ Sketched and deliberately left out, roughly in order of how useful they'd be:
   constantly may lose highlights between visits.
 - **The CSS Custom Highlight API is required.** Chrome and Edge 105+, Safari 17.2+. Firefox
   has it from 140. Without it the Highlight row simply doesn't appear.
+- **A streamed answer that fails halfway is an error, not a partial answer.** There is no way
+  to tell from the text that it stopped early, so half a summary presented as a whole one
+  would be worse than a failure you can retry.
+- **Follow-ups are not cached and cost a call each.** They also grow the conversation, so a
+  long thread on the on-device model will eventually exceed its context window and fall back
+  to DeepSeek mid-conversation.
+- **A custom tool is only as good as its prompt.** There is no validation beyond "it has a
+  name and a prompt" — a vague instruction gets a vague answer, and the extension has no way
+  to tell the difference.
+- **History records what you highlighted.** Sixty entries, local, off in one click, cleared in
+  one more. It is the most personal thing stored here and it is treated that way, but it is
+  worth knowing it exists.

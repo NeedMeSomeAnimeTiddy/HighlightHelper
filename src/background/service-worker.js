@@ -6,14 +6,15 @@
  * Content scripts only ever send messages here.
  */
 
-import { MSG, AI } from '../common/constants.js';
-import { getSettings, getApiKey } from '../common/settings.js';
+import { MSG, AI, PORT } from '../common/constants.js';
+import { getSettings, getApiKey, onSettingsChanged } from '../common/settings.js';
 import { CONTEXT_MENU_LANGUAGES, languageName } from '../common/languages.js';
 import { CONTEXT_TOOLS } from '../common/tools.js';
 import { cacheGet, cacheSet, cacheClear, cacheStats } from '../common/cache.js';
 import { cacheKey, hash } from '../common/hash.js';
 import { getRates, clearRates } from './rates.js';
-import { runAi, testApiKey } from './deepseek.js';
+import { runAi, runAiStream, runChat, testApiKey } from './deepseek.js';
+import { readHistory, remember as rememberRaw, clearHistory } from '../common/history.js';
 import { lookup, searchLinks, wikiLang } from './wikipedia.js';
 import { define, synonyms, dictionaryLinks, wiktLang } from './dictionary.js';
 
@@ -31,7 +32,7 @@ import { define, synonyms, dictionaryLinks, wiktLang } from './dictionary.js';
 const ROOT = 'hh-root';
 const PREFIX = 'hh:';
 
-async function buildContextMenus() {
+async function buildContextMenus(customTools = []) {
   await chrome.contextMenus.removeAll();
 
   chrome.contextMenus.create({
@@ -39,6 +40,25 @@ async function buildContextMenus() {
     title: 'Highlight Helper',
     contexts: ['selection']
   });
+
+  // The user's own tools, above the built-ins: they wrote them, so they are
+  // looking for them. Only here — the panel builds its own from settings.
+  if (customTools.length) {
+    for (const tool of customTools) {
+      chrome.contextMenus.create({
+        id: `${PREFIX}custom:${tool.id}`,
+        parentId: ROOT,
+        title: tool.name,
+        contexts: ['selection']
+      });
+    }
+    chrome.contextMenus.create({
+      id: `${ROOT}-sep-custom`,
+      parentId: ROOT,
+      type: 'separator',
+      contexts: ['selection']
+    });
+  }
 
   let separator = 0;
   for (const item of CONTEXT_TOOLS) {
@@ -92,17 +112,27 @@ async function buildContextMenus() {
  * So the current menu is fingerprinted and the fingerprint stored. Every time
  * the worker wakes it compares, and rebuilds when they differ — one storage
  * read in the common case, and no way for the menu to drift from the code.
+ *
+ * The user's own tools are part of the fingerprint, which is why it is computed
+ * rather than a constant: adding one in settings has to change the menu, and
+ * nothing else would notice.
  */
-const MENU_SIGNATURE = hash(JSON.stringify([CONTEXT_TOOLS, CONTEXT_MENU_LANGUAGES]));
+async function menuSignature(customTools) {
+  return hash(JSON.stringify([CONTEXT_TOOLS, CONTEXT_MENU_LANGUAGES, customTools]));
+}
 
 async function ensureContextMenus({ force = false } = {}) {
   try {
+    const settings = await getSettings();
+    const customTools = (settings.customTools || []).filter((t) => t?.id && t?.name && t?.prompt);
+    const signature = await menuSignature(customTools);
+
     if (!force) {
-      const { menuSignature } = await chrome.storage.local.get('menuSignature');
-      if (menuSignature === MENU_SIGNATURE) return;
+      const { menuSignature: stored } = await chrome.storage.local.get('menuSignature');
+      if (stored === signature) return;
     }
-    await buildContextMenus();
-    await chrome.storage.local.set({ menuSignature: MENU_SIGNATURE });
+    await buildContextMenus(customTools);
+    await chrome.storage.local.set({ menuSignature: signature });
   } catch (err) {
     console.error('[Highlight Helper] could not build the context menu:', err);
   }
@@ -110,6 +140,10 @@ async function ensureContextMenus({ force = false } = {}) {
 
 chrome.runtime.onInstalled.addListener(() => ensureContextMenus({ force: true }));
 chrome.runtime.onStartup.addListener(() => ensureContextMenus({ force: true }));
+
+// Editing a custom tool changes the menu, and the fingerprint above is what
+// makes that a no-op when it didn't.
+onSettingsChanged(() => ensureContextMenus());
 
 // Also on every worker start, so a stale menu heals itself without a reload.
 ensureContextMenus();
@@ -201,8 +235,14 @@ async function readStylesheet() {
   return stylesheetCache;
 }
 
-/** AI call with cache-around. Returns { text, cached }. */
-async function handleAi({ action, text, options = {} }) {
+/**
+ * AI call with cache-around. Returns { text, cached }.
+ *
+ * `onChunk` turns this into the streaming path. The cache is checked first
+ * either way — a cached answer arrives whole, and pretending to stream it back
+ * one token at a time would be theatre.
+ */
+async function handleAi({ action, text, options = {} }, onChunk = null) {
   const settings = await getSettings();
   const trimmed = (text || '').trim();
   if (!trimmed) throw new Error('Nothing to send');
@@ -214,7 +254,10 @@ async function handleAi({ action, text, options = {} }) {
   const keyOpts = {
     model: options.model || settings.model,
     ...(usesLanguage ? { language: options.language || settings.language } : {}),
-    ...(usesCodeHint ? { codeLanguage: options.language || '' } : {})
+    ...(usesCodeHint ? { codeLanguage: options.language || '' } : {}),
+    // A custom tool's answer depends entirely on its prompt, so two tools
+    // pointed at the same selection must not share a cache entry.
+    ...(action === AI.CUSTOM ? { tool: hash(options.systemPrompt || '') } : {})
   };
   const key = cacheKey(action, trimmed, keyOpts);
   const ttl = Math.max(0, settings.cacheDays) * 24 * 60 * 60 * 1000;
@@ -222,19 +265,80 @@ async function handleAi({ action, text, options = {} }) {
   const hit = await cacheGet(key, ttl);
   if (hit !== undefined) return { text: hit, cached: true };
 
-  const { text: out } = await runAi(action, trimmed, {
+  const callOptions = {
     ...options,
     language: options.language || settings.language,
     model: keyOpts.model
-  });
+  };
+
+  const { text: out } = onChunk
+    ? await runAiStream(action, trimmed, callOptions, onChunk)
+    : await runAi(action, trimmed, callOptions);
+
   await cacheSet(key, out);
+  await remember({ action, source: trimmed, text: out });
   return { text: out, cached: false };
 }
+
+/** History honours its setting here, so no caller has to remember to check. */
+async function remember(entry) {
+  const settings = await getSettings();
+  if (settings.keepHistory === false) return;
+  await rememberRaw(entry);
+}
+
+/**
+ * Streamed answers, over a port.
+ *
+ * One port per request, closed by the content script when the view goes away —
+ * which is also the cancel signal: navigating away or pressing Back while a
+ * summary is still arriving should stop it, and disconnecting is the only
+ * notification a worker gets that nobody is listening any more.
+ */
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== PORT.AI) return;
+
+  let alive = true;
+  port.onDisconnect.addListener(() => { alive = false; });
+
+  port.onMessage.addListener(async (msg) => {
+    const post = (payload) => {
+      if (!alive) return;
+      try {
+        port.postMessage(payload);
+      } catch {
+        alive = false;
+      }
+    };
+
+    try {
+      const result = msg?.type === MSG.CHAT
+        ? await runChat(msg.messages || [], msg.options || {}, (text) => post({ chunk: text }))
+        : await handleAi(msg, (text) => post({ chunk: text }));
+      post({ done: true, ...result });
+    } catch (err) {
+      post({ error: String(err?.message || err) });
+    } finally {
+      if (alive) port.disconnect();
+    }
+  });
+});
 
 async function handle(msg) {
   switch (msg?.type) {
     case MSG.AI:
       return { ok: true, ...(await handleAi(msg)) };
+
+    case MSG.CHAT: {
+      const result = await runChat(msg.messages || [], msg.options || {});
+      return { ok: true, ...result };
+    }
+
+    case MSG.HISTORY:
+      return { ok: true, entries: await readHistory() };
+
+    case MSG.CLEAR_HISTORY:
+      return { ok: true, cleared: await clearHistory() };
 
     case MSG.RATES: {
       const settings = await getSettings();
