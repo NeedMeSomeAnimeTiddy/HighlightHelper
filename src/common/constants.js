@@ -16,6 +16,9 @@ export const MSG = {
   PING: 'hh:ping',
   /** Look a term up in Wikipedia — a real reference, not a model citation. */
   SOURCE: 'hh:source',
+  /** Definitions for one word (Wiktionary), and synonyms on request (Datamuse). */
+  DEFINE: 'hh:define',
+  SYNONYMS: 'hh:synonyms',
   /** background -> content script: open the panel, optionally at one tool. */
   RUN_TOOL: 'hh:run-tool'
 };

@@ -99,16 +99,70 @@ function identify(text) {
     } catch { /* malformed escape — not percent-encoded after all */ }
   }
 
+  const entities = decodeEntities(t);
+  if (entities) return { kind: 'entities', text: entities };
+
   const b64 = tryBase64(t);
   if (b64) return { kind: 'base64', text: b64 };
 
   return null;
 }
 
+/**
+ * HTML entities — `&amp;`, `&#8212;`, `&#x2014;`.
+ *
+ * Decoded by table and by code point rather than by assigning to `innerHTML`
+ * and reading `textContent` back. That trick is the usual one-liner and it is
+ * an HTML parser pointed at untrusted text; the fact that it happens to be
+ * inert for entities alone is not a property worth relying on inside a content
+ * script that runs on every page.
+ *
+ * Only the named entities that actually appear in copied text are listed. The
+ * full set is over two thousand and the rest are numeric in practice.
+ */
+const NAMED = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  mdash: '—', ndash: '–', hellip: '…', lsquo: '‘', rsquo: '’',
+  ldquo: '“', rdquo: '”', copy: '©', reg: '®', trade: '™',
+  deg: '°', pound: '£', euro: '€', yen: '¥', cent: '¢',
+  times: '×', divide: '÷', plusmn: '±', frac12: '½', bull: '•',
+  laquo: '«', raquo: '»', dagger: '†', sect: '§', para: '¶'
+};
+
+const RE_ENTITY = /&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]{1,31});/gi;
+
+function decodeEntities(text) {
+  if (!RE_ENTITY.test(text)) return null;
+  RE_ENTITY.lastIndex = 0;
+
+  let changed = false;
+  const out = text.replace(RE_ENTITY, (whole, body) => {
+    let ch = null;
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10);
+      // Surrogates and out-of-range values are not text; leave them written out.
+      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff &&
+          !(code >= 0xd800 && code <= 0xdfff)) {
+        ch = String.fromCodePoint(code);
+      }
+    } else {
+      ch = NAMED[body.toLowerCase()] ?? null;
+    }
+    if (ch == null) return whole;
+    changed = true;
+    return ch;
+  });
+
+  return changed ? out : null;
+}
+
 const LABELS = {
   jwt: ['JWT', 'Decode token'],
   json: ['JSON', 'Format JSON'],
   url: ['URL-encoded', 'Decode URL text'],
+  entities: ['HTML entities', 'Decode HTML entities'],
   base64: ['Base64', 'Decode base64']
 };
 

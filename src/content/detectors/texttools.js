@@ -7,7 +7,7 @@
  * anyway, so the common case needs no click at all.
  */
 
-import { el, menu, replaceContent, resultView } from '../kit.js';
+import { el, menu, replaceContent, resultView, asyncView, errorBox } from '../kit.js';
 import { looksLikeLanguage, plural } from '../../common/text.js';
 
 const MIN_CHARS = 3;
@@ -52,6 +52,83 @@ export const TRANSFORMS = [
   },
   { key: 'strip', label: 'Collapse whitespace', fn: (t) => t.replace(/\s+/g, ' ').trim() }
 ];
+
+/* ------------------------------------------------------------------ *
+ * Line operations
+ * ------------------------------------------------------------------ */
+
+/**
+ * PopClip's "Text Lists" category, which turns out to be the thing people
+ * reach for most after case conversion: a pasted column that needs sorting, a
+ * list that needs its duplicates gone, lines that need to become a comma list.
+ *
+ * Kept separate from TRANSFORMS because these only make sense on something with
+ * more than one line, and offering "Sort lines" on a sentence is noise.
+ */
+const lines = (t) => t.split(/\r\n|\r|\n/);
+
+export const LINE_OPS = [
+  {
+    key: 'sort',
+    label: 'Sort lines',
+    fn: (t) => lines(t).sort((a, b) => a.localeCompare(b)).join('\n')
+  },
+  {
+    key: 'sortdesc',
+    label: 'Sort lines, reversed',
+    fn: (t) => lines(t).sort((a, b) => b.localeCompare(a)).join('\n')
+  },
+  { key: 'reverse', label: 'Reverse line order', fn: (t) => lines(t).reverse().join('\n') },
+  {
+    key: 'dedupe',
+    label: 'Remove duplicate lines',
+    fn: (t) => [...new Set(lines(t))].join('\n')
+  },
+  {
+    key: 'blanks',
+    label: 'Remove blank lines',
+    fn: (t) => lines(t).filter((l) => l.trim()).join('\n')
+  },
+  { key: 'join', label: 'Join into one line', fn: (t) => lines(t).map((l) => l.trim()).filter(Boolean).join(' ') },
+  {
+    key: 'commas',
+    label: 'Lines to comma list',
+    fn: (t) => lines(t).map((l) => l.trim()).filter(Boolean).join(', ')
+  },
+  {
+    key: 'split',
+    label: 'Comma list to lines',
+    fn: (t) => t.split(',').map((p) => p.trim()).filter(Boolean).join('\n')
+  }
+];
+
+/* ------------------------------------------------------------------ *
+ * Extraction
+ * ------------------------------------------------------------------ */
+
+/**
+ * Pull the emails, links or numbers out of a selection.
+ *
+ * This is the honest half of "extract to table": no model, no guessing about
+ * structure, just the things that have an unambiguous shape. What it finds, it
+ * found — it never invents a column.
+ */
+export const EXTRACTORS = [
+  { key: 'emails', label: 'Email addresses', re: /[^\s<>()[\]{}",;:]+@[a-z0-9.-]+\.[a-z]{2,}/gi },
+  // The final class refuses to end on punctuation, so "see https://a.com/x, and"
+  // yields the link without the comma that ended the clause. Greedy matching
+  // backtracks one character to satisfy it.
+  { key: 'urls', label: 'Links', re: /\bhttps?:\/\/[^\s<>()[\]{}"']*[^\s<>()[\]{}"'.,;:!?]/gi },
+  // Grouping commas are part of the number; a full stop is only part of it when
+  // digits follow, so "costs 12." gives 12 rather than "12.".
+  { key: 'numbers', label: 'Numbers', re: /-?\d[\d,]*(?:\.\d+)?/g }
+];
+
+export function extract(text, re) {
+  const found = String(text).match(re) || [];
+  // Order-preserving dedupe: a list of every repeat is rarely what was wanted.
+  return [...new Set(found)];
+}
 
 function preview(text) {
   const flat = text.replace(/\s+/g, ' ').trim();
@@ -117,11 +194,68 @@ export default {
             detailTitle: t.label,
             open: (ctx) => resultView(result, ctx, { label: t.label })
           };
-        })
+        }),
+
+        // Only when there is more than one line to operate on. A "Sort lines"
+        // row under a sentence is a row that can only disappoint.
+        ...(match.stats.lines > 1
+          ? LINE_OPS.map((t) => {
+              const result = t.fn(text);
+              return {
+                key: `texttools:${t.key}`,
+                icon: 'list',
+                label: t.label,
+                value: preview(result),
+                detailTitle: t.label,
+                open: (ctx) => resultView(result, ctx, { label: t.label })
+              };
+            })
+          : []),
+
+        // Likewise: an extractor that found nothing is not worth a row.
+        ...EXTRACTORS.flatMap((e) => {
+          const found = extract(text, e.re);
+          if (!found.length) return [];
+          const result = found.join('\n');
+          return [{
+            key: `texttools:${e.key}`,
+            icon: 'list',
+            label: e.label,
+            value: plural(found.length, 'found', 'found'),
+            detailTitle: e.label,
+            open: (ctx) => resultView(result, ctx, { label: e.label })
+          }];
+        }),
+
+        {
+          key: 'texttools:hash',
+          icon: 'decode',
+          label: 'SHA-256',
+          detailTitle: 'SHA-256',
+          open: (ctx) => hashView(text, ctx)
+        }
       ], api)
     }];
   }
 };
+
+/**
+ * SHA-256 via SubtleCrypto, which is async — hence a view rather than a value.
+ *
+ * Hashing the *exact* selection, bytes and all: no trimming, no whitespace
+ * collapsing. A hash of something subtly different from what you highlighted
+ * would be worse than useless, because it would look like an answer.
+ */
+function hashView(text, api) {
+  return asyncView('Hashing…', async () => {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const hex = [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    return resultView(hex, api, { label: 'SHA-256' });
+  }, (err) => errorBox(String(err?.message || err)));
+}
 
 function countView(s) {
   const box = el('div', { class: 'hh-detail' });

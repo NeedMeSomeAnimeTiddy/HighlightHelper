@@ -10,6 +10,7 @@ import { LANGUAGES } from '../common/languages.js';
 import { MSG, ERR, PROVIDER } from '../common/constants.js';
 import { LIST as DETECTOR_LIST } from '../content/detectors/index.js';
 import { localStatus, downloadModel } from '../content/local-ai.js';
+import { DEFAULT_ENGINES } from '../common/searchengines.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -29,7 +30,11 @@ const DETECTOR_BLURB = {
   summarize: 'Summary or key points for a long selection. Uses AI.',
   rewrite: 'Fix grammar, rewrite in another tone, or continue writing. Uses AI.',
   qr: 'Turns a link or short text into a scannable QR code. Local.',
-  texttools: 'Word count plus case conversion and slugs. Always available, ranked last.'
+  dictionary: 'Definitions and synonyms for a single word. Free — Wiktionary, no key.',
+  link: 'Copies a URL that scrolls to and highlights this exact text. Local.',
+  search: 'Opens the selection in a search engine or reference site. Local.',
+  speak: "Reads the selection aloud with the browser's own voice. Local.",
+  texttools: 'Counts, case conversion, line operations, extraction and SHA-256. Local, ranked last.'
 };
 
 let settings = DEFAULTS;
@@ -121,6 +126,103 @@ function wireDetectors() {
       return li;
     })
   );
+}
+
+/* ---------- search engines ---------- */
+
+/** The stored list if there is one, otherwise the shipped defaults. */
+function engineList() {
+  return settings.searchEngines?.length ? settings.searchEngines : DEFAULT_ENGINES;
+}
+
+function renderEngines() {
+  const list = $('searchEngines');
+  const enabled = settings.searchEnabled || [];
+
+  list.replaceChildren(...engineList().map((engine) => {
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = enabled.includes(engine.id);
+    input.addEventListener('change', async () => {
+      const next = input.checked
+        ? [...new Set([...(settings.searchEnabled || []), engine.id])]
+        : (settings.searchEnabled || []).filter((id) => id !== engine.id);
+      await persist({ searchEnabled: next });
+    });
+
+    const label = document.createElement('label');
+    label.className = 'check';
+    const text = document.createElement('span');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = engine.name;
+    const desc = document.createElement('span');
+    desc.className = 'desc';
+    desc.textContent = ` — ${engine.url}`;
+    text.append(name, desc);
+    label.append(input, text);
+
+    const li = document.createElement('li');
+    li.append(label);
+
+    // Only the ones the user added can be removed. Unticking a shipped engine
+    // is what "I don't want this" means for those, and deleting them would
+    // mean a later release could never add one back.
+    if (!DEFAULT_ENGINES.some((d) => d.id === engine.id)) {
+      const remove = document.createElement('button');
+      remove.className = 'ghost';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', async () => {
+        await persist({
+          searchEngines: engineList().filter((e) => e.id !== engine.id),
+          searchEnabled: (settings.searchEnabled || []).filter((id) => id !== engine.id)
+        });
+        renderEngines();
+      });
+      li.append(remove);
+    }
+
+    return li;
+  }));
+}
+
+function wireSearchEngines() {
+  renderEngines();
+
+  $('addEngine').addEventListener('click', async () => {
+    const name = $('customEngineName').value.trim();
+    const url = $('customEngine').value.trim();
+    const status = $('engineStatus');
+
+    if (!name || !url) {
+      flash(status, 'Both a name and a URL, please.', 'bad');
+      return;
+    }
+    // A URL with nowhere to put the selection is a bookmark, not a search.
+    if (!url.includes('{q}')) {
+      flash(status, 'The URL needs {q} where the selected text should go.', 'bad');
+      return;
+    }
+    try {
+      const parsed = new URL(url.replace('{q}', 'x'));
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('bad scheme');
+    } catch {
+      flash(status, "That doesn't look like a web address.", 'bad');
+      return;
+    }
+
+    const id = `custom:${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const next = engineList().filter((e) => e.id !== id).concat([{ id, name, url }]);
+    await persist({
+      searchEngines: next,
+      searchEnabled: [...new Set([...(settings.searchEnabled || []), id])]
+    });
+
+    $('customEngineName').value = '';
+    $('customEngine').value = '';
+    flash(status, `Added ${name}.`, 'ok');
+    renderEngines();
+  });
 }
 
 /* ---------- where AI runs ---------- */
@@ -324,6 +426,7 @@ function renderSites() {
   wirePreferences();
   wireProvider();
   wireDetectors();
+  wireSearchEngines();
   renderSites();
   wireCache();
   await wireApiKey();

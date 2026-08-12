@@ -122,6 +122,27 @@
     </section>
 
     <section class="card">
+      <h2>Search with…</h2>
+      <p class="hint">
+        Which sites the <strong>Search with…</strong> row offers. Opening one sends the
+        selected text to that site, which is why it is always a button and never automatic.
+      </p>
+      <ul class="checks" id="searchEngines"></ul>
+
+      <div class="field">
+        <label for="customEngine">Add your own</label>
+        <div class="row">
+          <input id="customEngineName" type="text" spellcheck="false" placeholder="Name" class="narrow">
+          <input id="customEngine" type="text" spellcheck="false"
+                 placeholder="https://example.com/search?q={q}">
+          <button id="addEngine" type="button">Add</button>
+        </div>
+        <p class="hint"><code>{q}</code> is replaced with the selected text.</p>
+        <span id="engineStatus" class="status" role="status"></span>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Cache</h2>
       <p class="hint">
         AI answers are cached by the exact text and action, so re-selecting something costs nothing.

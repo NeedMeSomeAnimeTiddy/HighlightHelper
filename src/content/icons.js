@@ -117,7 +117,24 @@ const PATHS = {
     'M8 1.6a6.4 6.4 0 1 0 0 12.8A6.4 6.4 0 0 0 8 1.6z',
     'M8 4.9v3.9M8 11.2h.01'
   ],
-  dot: ['M8 7.9h.02']
+  dot: ['M8 7.9h.02'],
+  // magnifier — search with…
+  search: ['M7.1 2.6a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z', 'M10.4 10.4l3 3'],
+  // two chain links — copy link to highlight
+  link: [
+    'M6.6 9.4a2.6 2.6 0 0 1 0-3.7l2-2a2.6 2.6 0 0 1 3.7 3.7l-.9.9',
+    'M9.4 6.6a2.6 2.6 0 0 1 0 3.7l-2 2a2.6 2.6 0 0 1-3.7-3.7l.9-.9'
+  ],
+  // open book — dictionary
+  book: [
+    'M8 4.3S6.8 3 4.6 3H2.3v8.6h2.6c1.9 0 3.1 1.1 3.1 1.1s1.2-1.1 3.1-1.1h2.6V3h-2.3C9.2 3 8 4.3 8 4.3z',
+    'M8 4.3v8.4'
+  ],
+  // speaker with a wave — read aloud
+  speak: [
+    'M3.4 6.2h2L8 3.8v8.4L5.4 9.8h-2z',
+    'M10.4 6.2a2.6 2.6 0 0 1 0 3.6M12.2 4.4a5.1 5.1 0 0 1 0 7.2'
+  ]
 };
 
 /** Builds an <svg> glyph. Unknown names fall back to a dot. */

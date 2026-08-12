@@ -36,13 +36,27 @@ export const DEFAULTS = {
     unit: true,
     code: true,
     decode: true,
+    dictionary: true,
     translate: true,
     jargon: true,
     summarize: true,
     rewrite: true,
     qr: true,
+    link: true,
+    search: true,
+    speak: true,
     texttools: true
   },
+
+  /**
+   * "Search with…" — which sites are offered, and the list they come from.
+   *
+   * Empty means "use the defaults in common/searchengines.js". Storing an empty
+   * list rather than a copy of the defaults means a later release can add an
+   * engine and existing users see it.
+   */
+  searchEngines: [],
+  searchEnabled: ['google', 'ddg', 'wikipedia', 'youtube'],
 
   /** Master switch + per-origin opt-outs (hostnames). */
   enabled: true,

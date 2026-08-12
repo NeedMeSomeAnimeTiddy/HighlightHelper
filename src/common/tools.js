@@ -18,8 +18,15 @@ export const CONTEXT_TOOLS = [
   { id: 'menu', title: 'Open Highlight Helper' },
   { type: 'separator' },
 
+  { id: 'dictionary', title: 'Define this word' },
   { id: 'explain', title: 'Explain this' },
   { id: 'translate', title: 'Translate to…', children: 'languages' },
+  { id: 'speak', title: 'Read aloud' },
+
+  { type: 'separator' },
+
+  { id: 'link', title: 'Link to this text' },
+  { id: 'search', title: 'Search with…' },
 
   { type: 'separator' },
 
@@ -76,7 +83,16 @@ export const CONTEXT_TOOLS = [
       { id: 'texttools:snake', title: 'snake_case' },
       { id: 'texttools:kebab', title: 'kebab-case' },
       { id: 'texttools:slug', title: 'URL slug' },
-      { id: 'texttools:strip', title: 'Collapse whitespace' }
+      { id: 'texttools:strip', title: 'Collapse whitespace' },
+      { id: 'texttools:sort', title: 'Sort lines' },
+      { id: 'texttools:sortdesc', title: 'Sort lines, reversed' },
+      { id: 'texttools:reverse', title: 'Reverse line order' },
+      { id: 'texttools:dedupe', title: 'Remove duplicate lines' },
+      { id: 'texttools:blanks', title: 'Remove blank lines' },
+      { id: 'texttools:join', title: 'Join into one line' },
+      { id: 'texttools:commas', title: 'Lines to comma list' },
+      { id: 'texttools:split', title: 'Comma list to lines' },
+      { id: 'texttools:hash', title: 'SHA-256' }
     ]
   },
   { id: 'qr', title: 'QR code' }
@@ -104,7 +120,11 @@ export const TOOL_HINTS = {
   rewrite: 'Rewriting needs at least five words of prose, and does not apply to code.',
   code: "That selection doesn't look like code.",
   texttools: 'Text tools needs a few characters of text.',
-  qr: "That selection is too long, or isn't the kind of thing worth scanning."
+  qr: "That selection is too long, or isn't the kind of thing worth scanning.",
+  dictionary: 'Define works on a single word — for a phrase or an acronym, try "Explain this".',
+  link: 'A link to a highlight only works on an ordinary web page, on a selection of a few words.',
+  search: 'Searching needs a short selection, and at least one site turned on in settings.',
+  speak: 'Reading aloud needs some actual prose, and this browser has to support speech.'
 };
 
 /** 'rewrite:fix' -> 'rewrite'. Used to look up a hint for a submenu item. */

@@ -15,6 +15,7 @@ import { cacheKey, hash } from '../common/hash.js';
 import { getRates, clearRates } from './rates.js';
 import { runAi, testApiKey } from './deepseek.js';
 import { lookup, searchLinks, wikiLang } from './wikipedia.js';
+import { define, synonyms, dictionaryLinks, wiktLang } from './dictionary.js';
 
 /*
  * Right-click menu.
@@ -160,6 +161,25 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 /**
+ * Keyboard shortcut.
+ *
+ * The selection icon needs a mouse, and the README already lists the cases
+ * where it never appears — a page that swallows mouse events, a selection made
+ * with the keyboard. This is the same "open the panel on what's selected" the
+ * icon does, with no pointer involved.
+ *
+ * `menu` is the tool id that means "just run detection", which is exactly what
+ * clicking the icon does.
+ */
+chrome.commands?.onCommand.addListener(async (command) => {
+  if (command !== 'open-panel') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  // No selectionText here — a command carries none, so the page reads its own.
+  deliver(tab.id, undefined, { type: MSG.RUN_TOOL, tool: 'menu', language: null, text: '' });
+});
+
+/**
  * panel.css, read here rather than in the page.
  *
  * A content script's own fetch runs against the page's network context, so a
@@ -265,6 +285,44 @@ async function handle(msg) {
       const articles = await lookup(term, lang, context);
       await cacheSet(key, articles);
       return { ok: true, articles, cached: false, links: searchLinks(term, lang) };
+    }
+
+    case MSG.DEFINE: {
+      const settings = await getSettings();
+      const word = String(msg.word || '').trim();
+      if (!word) return { ok: false, error: 'Nothing to look up' };
+
+      const lang = wiktLang(msg.language || settings.language);
+      const key = `dict|${lang}|${hash(word.toLowerCase())}`;
+      const ttl = 7 * 24 * 60 * 60 * 1000;
+
+      const hit = await cacheGet(key, ttl);
+      if (hit !== undefined) {
+        return { ok: true, ...hit, cached: true, links: dictionaryLinks(word, lang) };
+      }
+
+      // A word with no entry today has none tomorrow, so that answer is cached
+      // too. A transport failure is not — see the same reasoning under SOURCE.
+      const result = await define(word, lang);
+      await cacheSet(key, result);
+      return { ok: true, ...result, cached: false, links: dictionaryLinks(word, lang) };
+    }
+
+    case MSG.SYNONYMS: {
+      const settings = await getSettings();
+      const word = String(msg.word || '').trim();
+      if (!word) return { ok: false, error: 'Nothing to look up' };
+
+      const lang = wiktLang(msg.language || settings.language);
+      const key = `syn|${lang}|${hash(word.toLowerCase())}`;
+      const ttl = 7 * 24 * 60 * 60 * 1000;
+
+      const hit = await cacheGet(key, ttl);
+      if (hit !== undefined) return { ok: true, words: hit, cached: true };
+
+      const words = await synonyms(word, lang);
+      await cacheSet(key, words);
+      return { ok: true, words, cached: false };
     }
 
     default:

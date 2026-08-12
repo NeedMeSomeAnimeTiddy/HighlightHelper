@@ -100,7 +100,23 @@ The heuristic stays as the fallback when the API is unavailable.
 
 ---
 
-## Phase 2 — The free wins
+## Phase 2 — The free wins ✅ built
+
+*Shipped. Four new detectors (`dictionary`, `link`, `search`, `speak`), the text tools
+roughly tripled, HTML entities in the decoder, and a keyboard shortcut.*
+
+**What differed from the plan.** The context-rebuilding in `anchor.js` had to become a
+character window rather than a word count — rejoining words with spaces loses the punctuation
+between them, so uniqueness probes failed against text that was really there. And all four
+new catch-all detectors needed the same `looksLikeLanguage()` gate the text tools already
+had; without it they each offered to search for, link to and read aloud a hex colour that
+another detector had already answered. The existing test block for exactly that caught it.
+
+**Not verifiable here.** Chrome only activates a text fragment on a user-initiated
+navigation, so an automated click-through can't confirm one works end to end — a known-good
+fragment taken straight from the DOM behaves identically to a generated one under
+automation. The syntax is verified (the browser parses and strips the directive) and the
+generator is unit-tested; the last step is a human clicking a generated link.
 
 Everything here is local or keyless, and none of it needs Phase 1.
 

@@ -54,10 +54,15 @@ import summarize from './summarize.js';
 import rewrite from './rewrite.js';
 import qr from './qr.js';
 import texttools from './texttools.js';
+import dictionary from './dictionary.js';
+import search from './search.js';
+import link from './link.js';
+import speak from './speak.js';
 
 export const LIST = [
   color, datetime, currency, coords, calc, numberbase, regex, unit,
-  code, decode, translate, jargon, summarize, rewrite, qr, texttools
+  code, decode, dictionary, translate, jargon, summarize, rewrite, qr,
+  link, search, speak, texttools
 ];
 
 export function getDetector(id) {

@@ -18,7 +18,18 @@ import datetime from '../src/content/detectors/datetime.js';
 import calc from '../src/content/detectors/calc.js';
 import numberbase from '../src/content/detectors/numberbase.js';
 import decode from '../src/content/detectors/decode.js';
-import texttools, { TRANSFORMS as TEXT_TRANSFORMS } from '../src/content/detectors/texttools.js';
+import texttools, {
+  TRANSFORMS as TEXT_TRANSFORMS,
+  LINE_OPS,
+  EXTRACTORS,
+  extract
+} from '../src/content/detectors/texttools.js';
+import dictionary from '../src/content/detectors/dictionary.js';
+import search from '../src/content/detectors/search.js';
+import { buildTextFragment, occurrences, normalise, encodePart }
+  from '../src/content/anchor.js';
+import { searchUrlFor, resolveEngines } from '../src/common/searchengines.js';
+import { shapeDefinitions, wiktLang } from '../src/background/dictionary.js';
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import { AI, ERR } from '../src/common/constants.js';
 import { parseTopics } from '../src/common/text.js';
@@ -42,6 +53,25 @@ import {
 } from '../src/content/qr.js';
 import { decode as qrDecode } from './qr-roundtrip.js';
 import { detect, LIST } from '../src/content/detectors/index.js';
+
+/**
+ * Two detectors are gated on the environment rather than on the text: `link`
+ * needs a real page URL to point at, and `speak` needs the browser's speech
+ * synthesis. Node has neither, so without these stubs they can never produce a
+ * row — and the menu-id check below, which is the thing standing between a
+ * renamed key and a right-click entry that silently does nothing, would quietly
+ * stop covering them.
+ */
+globalThis.location ??= {
+  protocol: 'https:',
+  hostname: 'example.com',
+  href: 'https://example.com/article'
+};
+globalThis.speechSynthesis ??= { getVoices: () => [], cancel() {}, speak() {}, speaking: false };
+globalThis.SpeechSynthesisUtterance ??= function SpeechSynthesisUtterance() {};
+
+const { default: link } = await import('../src/content/detectors/link.js');
+const { default: speak } = await import('../src/content/detectors/speak.js');
 
 let passed = 0;
 const failures = [];
@@ -648,12 +678,19 @@ const topLevelKeys = new Set([
   ...rewriteRows.map((r) => r.key),
   ...rows(code, JS).map((r) => r.key),
   ...rows(qr, 'https://example.com').map((r) => r.key),
+  ...rows(dictionary, 'serendipity').map((r) => r.key),
+  ...rows(search, 'quantum entanglement').map((r) => r.key),
+  ...rows(link, 'a phrase worth linking to').map((r) => r.key),
+  ...rows(speak, 'a sentence worth reading aloud').map((r) => r.key),
   ...ttRows.map((r) => r.key)
 ]);
 const submenuKeys = new Set([
   ...REWRITE_TONES.map((t) => `rewrite:${t.action}`),
   'texttools:count',
-  ...TEXT_TRANSFORMS.map((t) => `texttools:${t.key}`)
+  'texttools:hash',
+  ...TEXT_TRANSFORMS.map((t) => `texttools:${t.key}`),
+  ...LINE_OPS.map((t) => `texttools:${t.key}`),
+  ...EXTRACTORS.map((e) => `texttools:${e.key}`)
 ]);
 
 const missing = contextIds.filter((id) => !topLevelKeys.has(id) && !submenuKeys.has(id));
@@ -669,6 +706,104 @@ check('a tool id resolves to the detector that owns it', [
 
 check('every tool family has an explanation for when it does not apply',
   [...new Set(contextIds.map(toolFamily))].filter((f) => !TOOL_HINTS[f]), []);
+
+/* ---------- anchoring and text fragments ---------- */
+
+const PAGE = 'The cat sat on the mat. Later the dog sat on the mat too. Nothing else happened.';
+
+// Whole words only, the same rule the browser matches fragments by.
+check('a word is not found inside a longer word', occurrences(normalise('a concatenate thing').toLowerCase(), 'cat'), 0);
+check('a word is found when it stands alone', occurrences(normalise('a cat thing').toLowerCase(), 'cat'), 1);
+
+check('an unambiguous phrase needs no context',
+  buildTextFragment('Nothing else happened', PAGE), 'Nothing%20else%20happened');
+
+// "sat" appears twice, so it has to be pinned down by what surrounds it.
+check('an ambiguous phrase gains a prefix and suffix',
+  buildTextFragment('sat', PAGE), 'The%20cat-,sat,-on%20the%20mat.');
+
+// Rebuilding context by rejoining words dropped the punctuation between them
+// and produced a probe that appears nowhere, so this used to return null.
+check('context spanning punctuation still resolves',
+  buildTextFragment('on the mat', PAGE) !== null, true);
+
+check('text absent from the page has no fragment',
+  buildTextFragment('not present here', PAGE), null);
+
+// Matching is case-insensitive; the emitted link is what a person reads.
+check('the page\'s own capitalisation survives',
+  buildTextFragment('nothing else happened', PAGE), 'Nothing%20else%20happened');
+
+// A bare hyphen inside a part is the prefix/suffix marker, so it cannot travel raw.
+check('hyphens are encoded, not left to restructure the directive',
+  encodePart('well-known'), 'well%2Dknown');
+
+check('a long selection travels as start,end', (() => {
+  const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen';
+  const frag = buildTextFragment(long, `Before. ${long}. After.`);
+  return frag && frag.split(',').length === 2;
+})(), true);
+
+/* ---------- search engines ---------- */
+
+check('a template without {q} is refused', searchUrlFor('https://example.com/', 'cat'), null);
+check('the query is percent-encoded',
+  searchUrlFor('https://e.com/?q={q}', 'a b&c'), 'https://e.com/?q=a%20b%26c');
+check('only enabled engines are offered',
+  resolveEngines({ searchEnabled: ['ddg'] }).map((e) => e.id), ['ddg']);
+check('an empty stored list falls back to the defaults, not to nothing',
+  resolveEngines({ searchEngines: [], searchEnabled: ['google'] }).map((e) => e.id), ['google']);
+
+// The catch-alls must not claim a selection a specific detector already owns.
+check('search stays off a hex colour', search.matches('#3f8ae0', S()), null);
+check('search stays off an amount', search.matches('$50', S()), null);
+check('search takes an ordinary phrase',
+  Boolean(search.matches('quantum entanglement', S())), true);
+
+/* ---------- dictionary ---------- */
+
+check('a single word is a dictionary lookup', dictionary.matches('serendipity', S())?.word, 'serendipity');
+check('hyphens and apostrophes are dictionary words', [
+  Boolean(dictionary.matches("o'clock", S())),
+  Boolean(dictionary.matches('self-evident', S()))
+], [true, true]);
+check('a phrase is not a dictionary lookup', dictionary.matches('service level agreement', S()), null);
+check('an acronym with digits is left to the jargon detector', dictionary.matches('IPv6', S()), null);
+check('a single letter is not worth looking up', dictionary.matches('a', S()), null);
+
+check('only the requested language survives shaping', shapeDefinitions({
+  en: [{ partOfSpeech: 'Noun', definitions: [{ definition: 'A <a href="/x">small</a> animal' }] }],
+  la: [{ partOfSpeech: 'Verb', definitions: [{ definition: 'Latin sense' }] }]
+}, 'en'), [{ partOfSpeech: 'Noun', definitions: [{ text: 'A small animal', example: '' }] }]);
+
+check('an unknown language falls back to English', [wiktLang('en-GB'), wiktLang('zz'), wiktLang('fr')],
+  ['en', 'en', 'fr']);
+
+/* ---------- line operations and extraction ---------- */
+
+const lineOp = (key, text) => LINE_OPS.find((o) => o.key === key).fn(text);
+check('lines sort', lineOp('sort', 'c\nA\nb'), 'A\nb\nc');
+check('duplicate lines collapse', lineOp('dedupe', 'a\nb\na'), 'a\nb');
+check('lines become a comma list', lineOp('commas', 'a\n b \nc'), 'a, b, c');
+check('a comma list becomes lines', lineOp('split', 'a, b ,c'), 'a\nb\nc');
+
+const ex = (key, text) => extract(text, EXTRACTORS.find((e) => e.key === key).re);
+check('emails are extracted and deduplicated',
+  ex('emails', 'mail a@b.com and a@b.com or x@y.co.uk!'), ['a@b.com', 'x@y.co.uk']);
+// The clause's punctuation is not part of the link.
+check('a trailing comma is not part of a URL',
+  ex('urls', 'see https://a.com/x, and https://b.io.'), ['https://a.com/x', 'https://b.io']);
+check('a sentence-ending full stop is not part of a number',
+  ex('numbers', '12 and -3.5 and 1,200 and costs 12.'), ['12', '-3.5', '1,200']);
+
+/* ---------- HTML entities ---------- */
+
+const entities = (t) => decode.matches(t, S());
+check('named entities decode', entities('caf&amp;eacute; &mdash; fine')?.text, 'caf&eacute; — fine');
+check('decimal and hex entities decode', entities('a &#8212; b &#x2014; c')?.text, 'a — b — c');
+check('an unknown entity is left alone', entities('&notareal; thing'), null);
+// Surrogate halves are not characters; writing them out is the honest answer.
+check('a surrogate code point is not decoded', entities('&#xD800; here'), null);
 
 /* ---------- providers ---------- */
 

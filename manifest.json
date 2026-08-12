@@ -10,8 +10,17 @@
   "host_permissions": [
     "https://api.deepseek.com/*",
     "https://open.er-api.com/*",
-    "https://*.wikipedia.org/*"
+    "https://*.wikipedia.org/*",
+    "https://*.wiktionary.org/*",
+    "https://api.datamuse.com/*"
   ],
+
+  "commands": {
+    "open-panel": {
+      "suggested_key": { "default": "Ctrl+Shift+Space", "mac": "Command+Shift+Space" },
+      "description": "Open Highlight Helper on the current selection"
+    }
+  },
 
   "background": {
     "service_worker": "src/background/service-worker.js",

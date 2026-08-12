@@ -391,6 +391,29 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Dictionary: the part of speech heading, then its numbered senses. */
+.hh-pos {
+  margin-top: 10px;
+  font-style: italic;
+}
+
+.hh-defs {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hh-defs li {
+  margin-bottom: 4px;
+}
+
+/* An example sentence sits under its sense rather than beside it. */
+.hh-defs .hh-sub {
+  display: block;
+  margin-top: 1px;
+}
+
 .hh-facts {
   margin-top: 9px;
   padding-top: 9px;

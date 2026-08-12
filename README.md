@@ -30,14 +30,18 @@ selection actually is:
 | A link, an address, a wifi string | A scannable QR code | No — local |
 | A code snippet | *Explain this code* with **Find a source**, and *Add comments* returning the same code with comments added | Yes, when you pick the row |
 | `65 mph`, `180 lbs`, `72°F`, `5'11"` | The converted measurement in the row. Open it for extras like ft+in or Kelvin | No — local |
-| A JWT, base64, `%20` escapes, JSON | Decoded or pretty-printed. JWT claims are listed, with `exp`/`iat` as real dates and an expiry warning | No — local |
+| A JWT, base64, `%20` escapes, `&amp;mdash;` entities, JSON | Decoded or pretty-printed. JWT claims are listed, with `exp`/`iat` as real dates and an expiry warning | No — local |
 | `SLA`, `CI/CD`, `technical debt` | *Explain this* → one plain-English sentence, then **Find a source** for a real encyclopedia entry | Explain yes; the source lookup is free |
 | Text in another language | *Translate* → your language, with a picker to switch | Yes, when you pick the row |
 | A paragraph or more | *Summarise* and *Key points*, both with **Find a source** | Yes, when you pick the row |
 | A sentence or longer | *Rewrite* → Fix spelling & grammar / Shorter / Formal / Casual / Continue writing, each with **Copy** and **Replace** | Yes, when you pick a tone |
-| Any text | *Text tools* → word/character counts, reading time, and UPPER / lower / Title / Sentence / camel / Pascal / snake / kebab / slug | No — local |
+| A single word | *Define* → part of speech, senses and examples from Wiktionary, plus **Say it** and **Synonyms** | No — keyless API |
+| Any prose | *Link to this text* → a `#:~:text=` URL that scrolls to and highlights exactly this | No — local |
+| Any prose | *Search with…* → Google, DuckDuckGo, Wikipedia, YouTube and whatever else you add | No — local |
+| Any prose | *Read aloud* → the browser's own voice | No — local |
+| Any text | *Text tools* → counts and reading time; UPPER / lower / Title / Sentence / camel / Pascal / snake / kebab / slug; sort, reverse, dedupe and join lines; every email, link or number in the selection; SHA-256 | No — local |
 
-Twelve of the sixteen tools never touch the network. Each can be switched off
+Sixteen of the twenty tools never touch the network. Each can be switched off
 individually in settings.
 
 The other four need a model, and there are two ways to get one. Chrome can run
@@ -207,6 +211,8 @@ Everything below lives in `chrome.storage.sync` except the API key.
 - **My language** — translations and explanations come back in this language, and text that
   looks like it's in a *different* language pushes the Translate tab to the front
 - **Tools** — turn individual detectors off
+- **Search with…** — which sites the search row offers, plus your own; an entry is a name
+  and a URL with `{q}` where the selection goes
 - **Rewriter threshold** — how long a selection has to be before the Rewrite tab appears
 - **Cache** — how long AI answers are kept, plus a clear button
 - **Sites** — a master switch, and per-site opt-outs (set those from the toolbar popup)
@@ -219,6 +225,10 @@ Everything below lives in `chrome.storage.sync` except the API key.
   The panel animates to each view's height rather than jumping, and its width never changes
 - **Rewrite** drills into its four tones rather than using a hover flyout — a flyout near a
   screen edge has to flip sides and is awkward on touch
+
+There is also a keyboard shortcut — <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>
+(<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> on a Mac) — which opens the panel on whatever
+is selected without touching the mouse. Rebind it at `chrome://extensions/shortcuts`.
 
 | Key | Does |
 | --- | --- |
@@ -382,15 +392,19 @@ src/
     hash.js                   FNV-1a + cache key builder
     prompts.js                the prompts, shared by both providers
     cache.js                  TTL + LRU cache over chrome.storage.local
+    searchengines.js          the "Search with…" defaults and URL templating
   background/
-    service-worker.js         message router, context menu
+    service-worker.js         message router, context menu, keyboard command
     deepseek.js               chat-completions client (owns the key)
     wikipedia.js              term lookup + context ranking for "Find a source"
+    dictionary.js             Wiktionary definitions + Datamuse synonyms
     rates.js                  exchange rate fetch + TTL cache
   content/
     loader.js                 classic content script; imports main.js as a module
     main.js                   selection capture, shadow host, view stack, replace
     local-ai.js               Chrome's built-in model; api.ai() tries it first
+    anchor.js                 find this text in the page, unambiguously
+    speech.js                 read aloud, via speechSynthesis
     kit.js                    el(), menu(), and the shared UI pieces
     icons.js                  monochrome 16px SVG glyphs
     qr.js                     QR encoder — byte mode, level M, versions 1-20
@@ -400,7 +414,7 @@ src/
       color.js  datetime.js  currency.js  coords.js  calc.js
       numberbase.js  regex.js  unit.js  code.js  decode.js
       translate.js  jargon.js  summarize.js  rewrite.js  qr.js
-      texttools.js
+      dictionary.js  link.js  search.js  speak.js  texttools.js
       langdetect.js           small script/stopword language guesser
       codelang.js             "is this code, and which language?"
   options/                    options page
@@ -451,6 +465,53 @@ commit it, and removes it again synchronously, which transitions to the resting 
 earlier version added the visible class in a rAF callback, which meant the entire panel
 rendered at `opacity: 0` until a frame arrived. Revealing the UI must be what happens when
 nothing runs, not something that has to run.
+
+**Why linking to a highlight and re-finding a highlight are one file.** Generating a
+`#:~:text=` fragment and re-attaching a saved highlight to a page that has changed are the
+same problem: find this text, and be sure there is only one of it. `content/anchor.js` is
+that, written once.
+
+The hard part is never finding the text. It is refusing to guess. A link to the third
+occurrence of "however" that lands on the first *looks like it worked*, so `buildTextFragment`
+returns null rather than emitting a directive it can't prove is unique, and the panel offers
+the plain page URL instead. Uniqueness is tested against a normalised copy of the page's own
+text using the same three rules the browser matches by — case-insensitive, whitespace
+collapsed, whole words — and it errs towards finding *more* matches than the browser would,
+which is the safe direction: the cost is a longer link, never a wrong one.
+
+Two things that were wrong in the first version and are worth not rediscovering. Rebuilding
+the surrounding context by splitting into words and rejoining with spaces turns "on the mat"
+followed by ". Later" into "on the mat later", which appears nowhere on the page — so the
+uniqueness probe failed and perfectly linkable selections were refused. The context is a
+character window now, a real contiguous slice, so what gets tested is exactly what gets
+emitted. And `encodeURIComponent` leaves `-` alone, which is the character that marks a
+prefix or suffix — an ordinary hyphenated word would silently restructure the whole
+directive, so `encodePart` escapes it by hand.
+
+**Why the dictionary ranks ahead of "Explain this".** Selecting one ordinary word used to
+spend a model call answering a question a dictionary answers better and for free. So
+`dictionary` sits at priority 38 and `jargon` at 40, and jargon keeps the acronyms and
+multi-word phrases it is actually good at. Pronunciation is `speechSynthesis` rather than a
+second API, because the browser can already say the word.
+
+**Why "Search with…" ships ten engines and not a hundred.** It is the largest category in
+every tool of this kind — PopClip carries well over a hundred — and shipping that many makes
+the menu worse for everyone who wanted three. The list is editable instead, and an entry is
+just a URL with `{q}` in it.
+
+**Why the catch-alls all share one gate.** `search`, `link`, `speak` and `texttools` match on
+shape rather than on a pattern, so each of them would happily offer to search for `#3f8ae0`,
+link to `$50` and read a JWT aloud. A selection like that already has a detector that owns
+it, and a second row is pure noise — so all four go through `looksLikeLanguage()`, and a
+block of tests pins down what they must *not* claim. The right-click menu still reaches any
+of them by name, because asking for a tool explicitly is different from being offered it.
+
+**Why HTML entities are decoded by table rather than by `innerHTML`.** The usual one-liner
+is to assign the text to a detached element's `innerHTML` and read `textContent` back. That
+is an HTML parser pointed at untrusted text, and the fact that it happens to be inert for
+entities alone is not a property worth depending on inside a content script that runs on
+every page. So there is a small named table and a code-point branch, and anything unrecognised
+is left written out.
 
 **Why detectors have a "is this prose?" gate.** `translate`, `rewrite`, `summarize`,
 `texttools` and `qr` match on shape rather than on a pattern, so without `common/text.js`
@@ -596,7 +657,7 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-248 assertions over number parsing, every detector's `matches()`, menu row construction,
+282 assertions over number parsing, every detector's `matches()`, menu row construction,
 ordering, the QR encoder and its round trip, the right-click menu's ids, and that every AI
 action a menu row can send has a prompt waiting for it — including a block that pins down
 what the catch-all detectors must *not* claim. No framework, no
@@ -684,3 +745,17 @@ Sketched and deliberately left out, roughly in order of how useful they'd be:
   menu hiding it.
 - **Same-tab frames only.** The script runs in frames larger than 80×80px; selections inside a
   cross-origin iframe are handled by that frame's own copy.
+- **A link to a highlight can be refused.** Text that appears in several places and can't be
+  pinned down by its surroundings gets no fragment — the panel says so and offers the plain
+  page link. That is deliberate: a fragment landing on the wrong paragraph looks like it
+  worked. Text fragments are also Chromium and Safari only; in Firefox the link still opens
+  the right page, it just doesn't scroll.
+- **The dictionary is Wiktionary, so coverage is uneven.** Common words are well served;
+  proper nouns and very new usage often aren't, and non-English entries vary by language.
+  Synonyms are English only, because Datamuse is an English corpus and offering it elsewhere
+  would return nothing and look broken.
+- **Read aloud uses whatever voices the OS has.** Chrome's `getVoices()` is empty on its first
+  call, so the very first reading may use the default voice rather than one matched to the
+  text's language. It is not worth an event listener to fix a one-time accent.
+- **Extraction finds shapes, not meaning.** "Numbers" will happily pull the 3 out of "COVID-19
+  in 3 charts". It never invents anything, but it doesn't know what it found.
