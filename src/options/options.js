@@ -7,8 +7,9 @@ import {
 } from '../common/settings.js';
 import { CURRENCIES } from '../common/currencies.js';
 import { LANGUAGES } from '../common/languages.js';
-import { MSG, ERR } from '../common/constants.js';
+import { MSG, ERR, PROVIDER } from '../common/constants.js';
 import { LIST as DETECTOR_LIST } from '../content/detectors/index.js';
+import { localStatus, downloadModel } from '../content/local-ai.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,12 +22,12 @@ const DETECTOR_BLURB = {
   numberbase: 'Converts between decimal, hex, binary and octal. Local.',
   regex: 'Breaks a regular expression down token by token. Local.',
   unit: 'Converts miles, kg, °F and friends. Local, no API calls.',
-  code: 'Explains a code selection, or adds comments to it. Uses DeepSeek.',
+  code: 'Explains a code selection, or adds comments to it. Uses AI.',
   decode: 'Decodes JWTs, base64 and URL-encoding; formats JSON. Local.',
-  translate: 'Translates the selection. Uses DeepSeek.',
-  jargon: 'One-line plain-English explanation of a term or acronym. Uses DeepSeek.',
-  summarize: 'Summary or key points for a long selection. Uses DeepSeek.',
-  rewrite: 'Fix grammar, rewrite in another tone, or continue writing. Uses DeepSeek.',
+  translate: 'Translates the selection. Uses AI.',
+  jargon: 'One-line plain-English explanation of a term or acronym. Uses AI.',
+  summarize: 'Summary or key points for a long selection. Uses AI.',
+  rewrite: 'Fix grammar, rewrite in another tone, or continue writing. Uses AI.',
   qr: 'Turns a link or short text into a scannable QR code. Local.',
   texttools: 'Word count plus case conversion and slugs. Always available, ranked last.'
 };
@@ -120,6 +121,91 @@ function wireDetectors() {
       return li;
     })
   );
+}
+
+/* ---------- where AI runs ---------- */
+
+const PROVIDER_HINT = {
+  [PROVIDER.AUTO]:
+    'Anything the on-device model can handle stays on this machine. Long selections and ' +
+    'anything it cannot do fall through to DeepSeek.',
+  [PROVIDER.LOCAL]:
+    'Nothing is ever sent to DeepSeek. Tools the on-device model cannot serve — usually ' +
+    'because the selection is too long for its context window — will say so instead.',
+  [PROVIDER.CLOUD]:
+    'Every AI tool goes to DeepSeek and needs the API key below.'
+};
+
+/** Turns the raw availability strings into one sentence and maybe a button. */
+function describeLocal({ supported, model, summarizer }) {
+  if (!supported) {
+    return {
+      text: 'Not available in this browser. Needs Chrome 138 or newer.',
+      kind: 'bad',
+      offerDownload: false
+    };
+  }
+  if (model === 'available' || summarizer === 'available') {
+    return { text: 'Ready — answers stay on this machine.', kind: 'ok', offerDownload: false };
+  }
+  if (model === 'downloading' || summarizer === 'downloading') {
+    return { text: 'Downloading… this page can be closed.', kind: '', offerDownload: false };
+  }
+  if (model === 'downloadable' || summarizer === 'downloadable') {
+    return { text: 'Supported, but the model needs downloading first.', kind: '', offerDownload: true };
+  }
+  if (model === 'unknown') {
+    return { text: "Chrome didn't answer in time — reopen this page to retry.", kind: '', offerDownload: false };
+  }
+  return {
+    text: "This machine can't run it — usually not enough disk space or GPU memory.",
+    kind: 'bad',
+    offerDownload: false
+  };
+}
+
+async function refreshLocalStatus() {
+  const status = $('localStatus');
+  const button = $('downloadModel');
+  const state = describeLocal(await localStatus());
+
+  status.textContent = state.text;
+  status.className = `status ${state.kind}`.trim();
+  button.hidden = !state.offerDownload;
+}
+
+function wireProvider() {
+  const select = $('aiProvider');
+  select.value = settings.aiProvider || PROVIDER.AUTO;
+  $('providerHint').textContent = PROVIDER_HINT[select.value] || '';
+
+  select.addEventListener('change', (e) => {
+    $('providerHint').textContent = PROVIDER_HINT[e.target.value] || '';
+    persist({ aiProvider: e.target.value });
+  });
+
+  $('downloadModel').addEventListener('click', async () => {
+    const button = $('downloadModel');
+    const status = $('localStatus');
+    button.disabled = true;
+    status.className = 'status';
+    status.textContent = 'Starting…';
+
+    try {
+      // The click is also what satisfies the API's user-activation requirement,
+      // which is the other reason the download is not automatic.
+      await downloadModel((fraction) => {
+        status.textContent = `Downloading… ${Math.round(fraction * 100)}%`;
+      });
+      await refreshLocalStatus();
+    } catch (err) {
+      flash(status, `Download failed: ${err.message || err}`, 'bad');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  refreshLocalStatus();
 }
 
 /* ---------- API key ---------- */
@@ -236,6 +322,7 @@ function renderSites() {
 (async function init() {
   settings = await getSettings();
   wirePreferences();
+  wireProvider();
   wireDetectors();
   renderSites();
   wireCache();

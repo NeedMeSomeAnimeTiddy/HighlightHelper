@@ -9,7 +9,7 @@
  * more annoying than a wrong hint in a prompt the model can ignore.
  */
 
-import { el, asyncView, actionRow, copyButton, topicSourceButton } from '../kit.js';
+import { el, asyncView, actionRow, copyButton, topicSourceButton, provenanceNote } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode, guessLanguage } from './codelang.js';
 
@@ -42,7 +42,7 @@ export default {
           const view = el('div', {},
             el('div', { class: 'hh-text', text: res.text }),
             actions,
-            res.cached ? el('p', { class: 'hh-sub', text: 'From cache' }) : null
+            provenanceNote(res)
           );
           // A snippet has no encyclopedia title, so the topics are derived from
           // it first — see kit.topicSourceButton. The explanation goes along as

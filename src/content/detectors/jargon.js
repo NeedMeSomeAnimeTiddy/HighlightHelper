@@ -8,7 +8,7 @@
  * Costs a DeepSeek call, so nothing happens until the row is picked.
  */
 
-import { el, asyncView, copyButton, sourceButton } from '../kit.js';
+import { el, asyncView, copyButton, sourceButton, provenanceNote } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { letterRatio } from '../../common/text.js';
 
@@ -68,7 +68,7 @@ export default {
         const view = el('div', {},
           el('div', { class: 'hh-text', text: res.text }),
           actions,
-          res.cached ? el('p', { class: 'hh-sub', text: 'From cache' }) : null
+          provenanceNote(res)
         );
         // DeepSeek has no web access and cannot cite anything, so this is a
         // real encyclopedia lookup rather than a citation from the model. The

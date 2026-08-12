@@ -1,7 +1,53 @@
 import { getSettings, saveSettings, getApiKey } from '../common/settings.js';
-import { MSG } from '../common/constants.js';
+import { MSG, PROVIDER } from '../common/constants.js';
+import { localStatus } from '../content/local-ai.js';
 
 const $ = (id) => document.getElementById(id);
+
+/**
+ * "Can the AI tools actually answer right now?"
+ *
+ * Answered in two passes. A key is a storage read, so that lands immediately;
+ * whether the on-device model is installed needs Chrome to be asked, which can
+ * take seconds, so it upgrades the line afterwards rather than holding the
+ * popup shut. Claiming on-device availability before checking would be the one
+ * unacceptable option — the whole point of that mode is that it is a promise
+ * about where the text goes.
+ */
+async function renderProviderState() {
+  const state = $('keyState');
+  const settings = await getSettings();
+  const provider = settings.aiProvider || PROVIDER.AUTO;
+  const key = await getApiKey();
+
+  if (provider === PROVIDER.CLOUD) {
+    state.textContent = key
+      ? 'DeepSeek key saved. All tools available.'
+      : 'No DeepSeek key — the local tools still work.';
+    state.className = key ? 'key' : 'key bad';
+    return;
+  }
+
+  state.textContent = key ? 'DeepSeek key saved. Checking for the on-device model…' : 'Checking for the on-device model…';
+  state.className = 'key';
+
+  const { model, summarizer } = await localStatus();
+  const onDevice = model === 'available' || summarizer === 'available';
+
+  if (onDevice) {
+    state.textContent = 'On-device model ready — nothing leaves this machine.';
+    state.className = 'key';
+  } else if (key) {
+    state.textContent = 'DeepSeek key saved. All tools available.';
+    state.className = 'key';
+  } else if (provider === PROVIDER.LOCAL) {
+    state.textContent = 'No on-device model yet, and DeepSeek is switched off. See settings.';
+    state.className = 'key bad';
+  } else {
+    state.textContent = 'No AI provider yet — the local tools still work. See settings.';
+    state.className = 'key bad';
+  }
+}
 
 /** Opera and Opera GX both carry OPR/ in the UA and share the same restriction. */
 const IS_OPERA = /\bOPR\//.test(navigator.userAgent);
@@ -169,14 +215,7 @@ async function refreshStatus() {
     }
   });
 
-  const key = await getApiKey();
-  const state = $('keyState');
-  if (key) {
-    state.textContent = 'DeepSeek key saved. All tools available.';
-  } else {
-    state.textContent = 'No DeepSeek key — the local tools still work.';
-    state.className = 'key bad';
-  }
+  renderProviderState();
 
   $('settings').addEventListener('click', () => {
     chrome.runtime.openOptionsPage();

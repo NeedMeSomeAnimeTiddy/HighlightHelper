@@ -50,9 +50,42 @@
     </section>
 
     <section class="card">
+      <h2>Where AI runs</h2>
+      <p class="hint">
+        The explain, translate, summarise and rewrite tools need a model. Chrome can run one
+        on this machine — no key, no cost, and the selected text never leaves the computer.
+        Everything else (currency, units, colours, dates, QR codes) is local either way.
+      </p>
+
+      <div class="field">
+        <label for="aiProvider">Answer with</label>
+        <select id="aiProvider">
+          <option value="auto">On-device when possible, DeepSeek otherwise</option>
+          <option value="local">On-device only — never send my text anywhere</option>
+          <option value="cloud">DeepSeek only</option>
+        </select>
+        <p class="hint" id="providerHint"></p>
+      </div>
+
+      <div class="field">
+        <label>On-device model</label>
+        <div class="row">
+          <button id="downloadModel" type="button" hidden>Download the model</button>
+          <span id="localStatus" class="status" role="status">Checking…</span>
+        </div>
+        <p class="hint">
+          It is a multi-gigabyte, one-time download, and it needs roughly 22&nbsp;GB free and a
+          reasonably recent GPU. That's why it is a button rather than something that happens
+          the first time you press a tool.
+        </p>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>DeepSeek API key</h2>
       <p class="hint">
-        Needed for the explain, translate, and rewrite tools. Currency and unit conversion work without it.
+        Needed for the explain, translate, and rewrite tools whenever the on-device model
+        isn't handling them. Currency and unit conversion work without it.
         Get one at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer noopener">platform.deepseek.com</a>.
         The key is stored in this browser's local extension storage only — it is never synced to your Google account and never committed to the source.
       </p>

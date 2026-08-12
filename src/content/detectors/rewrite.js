@@ -9,7 +9,7 @@
  * against what it replaced.
  */
 
-import { el, menu, asyncView, quote, actionRow } from '../kit.js';
+import { el, menu, asyncView, quote, actionRow, provenance } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { wordCount, looksLikeLanguage, plural } from '../../common/text.js';
 import { isCode } from './codelang.js';
@@ -80,7 +80,7 @@ function resultView(text, tone, api) {
     return tone.appends
       ? continueView(text, res, api)
       : el('div', {},
-          el('div', { class: 'hh-label', text: `Was${res.cached ? ' · cached' : ''}` }),
+          el('div', { class: 'hh-label', text: `Was${provenance(res)}` }),
           quote(text),
           el('div', { class: 'hh-label', text: tone.label }),
           el('div', { class: 'hh-text', text: res.text }),
@@ -96,7 +96,7 @@ function resultView(text, tone, api) {
 function continueView(original, res, api) {
   const joined = /\s$/.test(original) ? original + res.text : `${original} ${res.text}`;
   return el('div', {},
-    el('div', { class: 'hh-label', text: `Continued${res.cached ? ' · cached' : ''}` }),
+    el('div', { class: 'hh-label', text: `Continued${provenance(res)}` }),
     el('div', { class: 'hh-text' },
       el('span', { class: 'hh-dim', text: original.trimEnd() }),
       ' ',

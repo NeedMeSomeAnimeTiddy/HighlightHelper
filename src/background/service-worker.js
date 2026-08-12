@@ -10,7 +10,7 @@ import { MSG, AI } from '../common/constants.js';
 import { getSettings, getApiKey } from '../common/settings.js';
 import { CONTEXT_MENU_LANGUAGES, languageName } from '../common/languages.js';
 import { CONTEXT_TOOLS } from '../common/tools.js';
-import { cacheGet, cacheSet, cacheClear, cacheStats } from './cache.js';
+import { cacheGet, cacheSet, cacheClear, cacheStats } from '../common/cache.js';
 import { cacheKey, hash } from '../common/hash.js';
 import { getRates, clearRates } from './rates.js';
 import { runAi, testApiKey } from './deepseek.js';

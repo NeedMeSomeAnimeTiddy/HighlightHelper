@@ -16,6 +16,14 @@ export const DEFAULTS = {
   /** Language translations are produced in (BCP-47-ish tag). */
   language: 'en',
 
+  /**
+   * 'auto' | 'local' | 'cloud' — see PROVIDER in constants.js.
+   *
+   * 'auto' prefers Chrome's on-device model and falls back to DeepSeek, which
+   * is what makes the extension useful before anyone has pasted a key.
+   */
+  aiProvider: 'auto',
+
   /** Per-detector on/off switches, keyed by detector id. */
   detectors: {
     color: true,

@@ -9,7 +9,7 @@
  * language picker sits next to Copy/Replace for switching afterwards.
  */
 
-import { el, replaceContent, spinner, actionRow } from '../kit.js';
+import { el, replaceContent, spinner, actionRow, provenance } from '../kit.js';
 import { LANGUAGES, languageName } from '../../common/languages.js';
 import { detectLanguage, baseTag } from './langdetect.js';
 import { AI } from '../../common/constants.js';
@@ -87,7 +87,7 @@ function view(text, initialLanguage, api) {
         replaceContent(box,
           el('div', {
             class: 'hh-label',
-            text: `${languageName(target)}${res.cached ? ' · cached' : ''}`
+            text: `${languageName(target)}${provenance(res)}`
           }),
           el('div', { class: 'hh-text', text: res.text }),
           actionRow(res.text, api, [picker])

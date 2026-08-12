@@ -3,6 +3,15 @@
  *
  * DeepSeek calls cost money, so every AI response is cached by
  * hash(action + options + text). Repeating a selection is free.
+ *
+ * On-device answers are cached too. They cost nothing but several seconds of
+ * inference, and the panel's "cached" label should mean the same thing
+ * whichever provider answered.
+ *
+ * This lives in common/ rather than background/ because the content script
+ * caches its own on-device results, and content scripts can only import
+ * modules listed in web_accessible_resources — which covers common/ and
+ * content/, deliberately not background/.
  */
 
 const PREFIX = 'hh:c:';

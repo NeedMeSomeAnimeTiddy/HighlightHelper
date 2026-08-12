@@ -14,11 +14,12 @@
  */
 
 import { getSettings, onSettingsChanged, isEnabledFor } from '../common/settings.js';
-import { MSG, ERR } from '../common/constants.js';
+import { MSG, ERR, PROVIDER } from '../common/constants.js';
 import { TOOL_HINTS, toolFamily, detectorForTool } from '../common/tools.js';
 import { detect, getDetector } from './detectors/index.js';
 import { el, menu, glyph, errorBox, note } from './kit.js';
 import { markGlyph } from './icons.js';
+import { runLocal, isSupported as localSupported } from './local-ai.js';
 
 const MIN_CHARS = 2;
 const MAX_CHARS = 8000;
@@ -381,7 +382,13 @@ function openOptions() {
 }
 
 const FRIENDLY = {
-  [ERR.NO_KEY]: 'Add your DeepSeek API key in settings to use the AI tools.',
+  [ERR.NO_KEY]:
+    'This needs an AI provider. Either turn on the on-device model or add a ' +
+    'DeepSeek API key — both are in settings.',
+  [ERR.NO_LOCAL_MODEL]:
+    'Answers are set to stay on this machine, and the on-device model can\'t ' +
+    "handle this one — it may be too long, or the model isn't installed. " +
+    'Settings can allow DeepSeek as a fallback.',
   [ERR.BAD_KEY]: 'DeepSeek rejected that API key. Check it in settings.',
   [ERR.NO_FUNDS]: 'Your DeepSeek account is out of credit.',
   [ERR.RATE_LIMIT]: 'DeepSeek is rate-limiting right now. Try again in a moment.',
@@ -394,7 +401,9 @@ const FRIENDLY = {
 
 function errorFor(err, retry) {
   const code = String(err?.message || err);
-  const needsKey = code === ERR.NO_KEY || code === ERR.BAD_KEY;
+  // Every one of these is fixed in settings, not by pressing the button again.
+  const needsKey =
+    code === ERR.NO_KEY || code === ERR.BAD_KEY || code === ERR.NO_LOCAL_MODEL;
   // Retrying a stale worker just repeats the same failure.
   const canRetry = !needsKey && code !== ERR.STALE_WORKER;
   return errorBox(FRIENDLY[code] || code, {
@@ -409,8 +418,34 @@ function makeApi(extra = {}) {
     context: { title: document.title, host: location.hostname, url: location.href },
     canReplace: Boolean(current?.editable),
     send,
+    /**
+     * One call, two providers.
+     *
+     * Every detector goes through here, so this is the only place that knows
+     * there is a choice at all. On-device first when it's allowed, DeepSeek
+     * otherwise — and an on-device model that can't serve this particular
+     * action is not an error, it's a fall-through.
+     */
     async ai(action, text, options = {}) {
-      const res = await send({ type: MSG.AI, action, text, options });
+      const merged = { language: settings.language, ...options };
+      const provider = settings.aiProvider || PROVIDER.AUTO;
+      const pinnedLocal = provider === PROVIDER.LOCAL;
+
+      if (provider !== PROVIDER.CLOUD && localSupported()) {
+        try {
+          const local = await runLocal(action, text, merged, { cacheDays: settings.cacheDays });
+          if (local) return { ok: true, ...local };
+        } catch (err) {
+          // Pinned to local means "don't send my text anywhere", so a failure
+          // has to surface rather than quietly becoming a network request.
+          if (pinnedLocal) throw err;
+          console.warn('[Highlight Helper] on-device model failed, using DeepSeek:', err);
+        }
+      }
+
+      if (pinnedLocal) throw new Error(ERR.NO_LOCAL_MODEL);
+
+      const res = await send({ type: MSG.AI, action, text, options: merged });
       if (!res?.ok) throw new Error(res?.error || 'Request failed');
       return res;
     },

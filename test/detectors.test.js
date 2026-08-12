@@ -22,7 +22,10 @@ import texttools, { TRANSFORMS as TEXT_TRANSFORMS } from '../src/content/detecto
 import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/common/tools.js';
 import { AI, ERR } from '../src/common/constants.js';
 import { parseTopics } from '../src/common/text.js';
-import { buildPrompt } from '../src/background/deepseek.js';
+import { buildPrompt, cleanOutput } from '../src/common/prompts.js';
+import { runLocal, isSupported as localSupported, bulletsToPanelStyle }
+  from '../src/content/local-ai.js';
+import { provenance } from '../src/content/kit.js';
 import { wikiLang, searchUrl, summaryUrl, isUsable, searchLinks, rankByContext }
   from '../src/background/wikipedia.js';
 import summarize from '../src/content/detectors/summarize.js';
@@ -666,6 +669,39 @@ check('a tool id resolves to the detector that owns it', [
 
 check('every tool family has an explanation for when it does not apply',
   [...new Set(contextIds.map(toolFamily))].filter((f) => !TOOL_HINTS[f]), []);
+
+/* ---------- providers ---------- */
+
+// The contract main.js relies on: "can't serve this" is null, not a throw. Node
+// has none of the built-in AI globals, so this is the unsupported-browser path,
+// which is also the one most users will be on.
+check('an unsupported browser reports no local model', localSupported(), false);
+check('runLocal declines rather than throwing when unsupported',
+  await runLocal(AI.EXPLAIN, 'CDN', { language: 'en' }), null);
+
+// The Summarizer emits whatever markdown bullet it feels like; the panel and the
+// DeepSeek prompt both use "• ". A provider swap must not change how a row looks.
+check('key points are normalised to the panel bullet',
+  bulletsToPanelStyle('- First point\n* Second point\n• Third point'),
+  '• First point\n• Second point\n• Third point');
+check('key points survive having no bullets at all',
+  bulletsToPanelStyle('First point\n\nSecond point'),
+  '• First point\n• Second point');
+
+// Where an answer came from is shown, not implied.
+check('provenance labels both dimensions', [
+  provenance({ cached: true, local: true }),
+  provenance({ local: true }),
+  provenance({ cached: true }),
+  provenance({})
+], [' · cached, on-device', ' · on-device', ' · cached', '']);
+
+// Shared by both providers, so a fenced or quoted answer reads the same either way.
+check('fences and wrapping quotes are stripped', [
+  cleanOutput('```js\nconst a = 1;\n```'),
+  cleanOutput('"A service-level agreement."'),
+  cleanOutput('He said "hello" to her.')
+], ['const a = 1;', 'A service-level agreement.', 'He said "hello" to her.']);
 
 /* ---------- report ---------- */
 

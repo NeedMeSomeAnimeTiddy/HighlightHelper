@@ -8,7 +8,7 @@
  * Both cost a DeepSeek call, so nothing runs until a row is picked.
  */
 
-import { el, asyncView, actionRow, topicSourceButton } from '../kit.js';
+import { el, asyncView, actionRow, topicSourceButton, provenance } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { isCode } from './codelang.js';
 
@@ -53,7 +53,7 @@ function run(text, action, busy, label, api) {
     const res = await api.ai(action, text);
     const actions = actionRow(res.text, api);
     const view = el('div', {},
-      el('div', { class: 'hh-label', text: `${label}${res.cached ? ' · cached' : ''}` }),
+      el('div', { class: 'hh-label', text: `${label}${provenance(res)}` }),
       el('div', { class: 'hh-text', text: res.text }),
       actions
     );

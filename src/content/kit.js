@@ -140,6 +140,27 @@ export function errorBox(message, { onRetry, onSettings } = {}) {
   return wrap;
 }
 
+/**
+ * The suffix on a result's label: where the answer came from.
+ *
+ * "on-device" is worth saying every time. The difference between an answer
+ * computed on this machine and one that involved sending the selection to
+ * another company is not a detail, and it is invisible unless the panel says
+ * so. `res` is whatever api.ai() resolved to.
+ */
+export function provenance(res) {
+  const parts = [];
+  if (res?.cached) parts.push('cached');
+  if (res?.local) parts.push('on-device');
+  return parts.length ? ` · ${parts.join(', ')}` : '';
+}
+
+/** The same thing as its own line, for views that have no label to hang it on. */
+export function provenanceNote(res) {
+  const text = provenance(res).replace(/^ · /, '');
+  return text ? el('p', { class: 'hh-sub', text: text[0].toUpperCase() + text.slice(1) }) : null;
+}
+
 /** Swaps a container's contents in one go. */
 export function replaceContent(container, ...nodes) {
   container.replaceChildren(...nodes.flat().filter(Boolean));

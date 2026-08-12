@@ -41,6 +41,20 @@ export const AI = {
   TOPICS: 'topics'
 };
 
+/**
+ * Where AI answers come from.
+ *
+ * 'local' is Chrome's built-in Gemini Nano: no key, no network, no cost, and
+ * the selection never leaves the machine. It is not always possible — the
+ * model is a multi-gigabyte download and the hardware bar is real — so 'auto'
+ * uses it when it can and DeepSeek when it can't.
+ */
+export const PROVIDER = {
+  AUTO: 'auto',
+  LOCAL: 'local',
+  CLOUD: 'cloud'
+};
+
 /** Sentinel error codes the UI reacts to specially. */
 export const ERR = {
   NO_KEY: 'NO_KEY',
@@ -58,5 +72,12 @@ export const ERR = {
    * extension is reloaded. So a new tool can appear in the menu before the
    * worker can answer it.
    */
-  STALE_WORKER: 'STALE_WORKER'
+  STALE_WORKER: 'STALE_WORKER',
+  /**
+   * Answers were pinned to the on-device model and it can't serve this one.
+   * Only ever raised when the user chose 'local' explicitly — on 'auto' an
+   * unavailable local model is not an error, it is a quiet fall back to
+   * DeepSeek.
+   */
+  NO_LOCAL_MODEL: 'NO_LOCAL_MODEL'
 };

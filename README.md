@@ -40,6 +40,13 @@ selection actually is:
 Twelve of the sixteen tools never touch the network. Each can be switched off
 individually in settings.
 
+The other four need a model, and there are two ways to get one. Chrome can run
+**Gemini Nano on your machine** — no key, no cost, and the selection never leaves
+the computer — and there is **DeepSeek** for when it can't. Out of the box the
+extension uses the on-device model where it can and falls back, so the "Yes"
+column above means *"asks a model"*, not *"sends your text to a company"*. See
+[Where AI runs](#where-ai-runs).
+
 *Continue writing* is the one rewrite tone that appends rather than replaces, so
 its result shows the whole passage with the original dimmed and the new text in
 normal weight — and **Copy** and **Replace** take both, because replacing your
@@ -81,10 +88,42 @@ tool can appear in the menu while the worker has never heard of it. That combina
 reports `STALE_WORKER` and the panel says to reload, rather than failing with something
 cryptic like "Unknown AI action".
 
-## Add your DeepSeek API key
+## Where AI runs
 
-Currency and unit conversion work immediately. The explain, translate, and rewrite tools
-need a DeepSeek key.
+Currency and unit conversion work immediately. The explain, translate, summarise and
+rewrite tools need a model, and the options page has a **Where AI runs** card with three
+settings:
+
+| | |
+| --- | --- |
+| **On-device when possible, DeepSeek otherwise** | The default. Anything Chrome's built-in model can handle stays on this machine; everything else goes to DeepSeek |
+| **On-device only** | Nothing is ever sent to DeepSeek. Tools the local model can't serve say so instead of falling back |
+| **DeepSeek only** | Every AI tool goes to DeepSeek |
+
+### The on-device model
+
+Chrome 138 and newer ship Gemini Nano behind four standard APIs — `Summarizer`,
+`Translator`, `LanguageDetector` and `LanguageModel`. It costs nothing, works offline, and
+is the only configuration where "explain this" on a line of a private document isn't a
+request to a company in another country.
+
+It is not free of conditions. The model is a **multi-gigabyte one-time download**, and it
+wants roughly 22 GB of free disk and a GPU with more than 4 GB of VRAM (or 16 GB of RAM and
+four cores). Plenty of machines don't qualify, which is why the fallback exists and why the
+options page tells you which provider is actually in play rather than leaving you to guess.
+
+**The download is a button, never a side effect.** A tool that quietly began fetching
+several gigabytes because you highlighted a word would be indefensible, so the panel only
+ever *uses* a model that is already there. `availability()` reporting `downloadable` is
+treated exactly like unavailable, and the options page offers the download explicitly.
+
+`Writer`, `Rewriter` and `Proofreader` look like a natural fit for the rewrite tones and are
+deliberately unused — they are still origin-trial and simply absent from a normal browser.
+Those tones go through `LanguageModel` with the same prompt DeepSeek gets.
+
+### Add your DeepSeek API key
+
+Needed unless you are running on-device only.
 
 1. Get a key from [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)
 2. Open the extension's options page — either:
@@ -160,6 +199,7 @@ nothing, that's where a delivery failure would be reported.
 
 Everything below lives in `chrome.storage.sync` except the API key.
 
+- **Where AI runs** — on-device, DeepSeek, or on-device first with DeepSeek behind it
 - **Convert currencies into** — the target for currency conversion
 - **Preferred unit system** — metric or imperial. If a measurement is already in your system,
   it converts the other way, so the answer is always the number you don't already have
@@ -303,6 +343,7 @@ If there's no article, you get real search links instead — never a generated U
 DeepSeek calls are cheap but not free, so:
 
 - Nothing is sent on selection. Every AI tool waits for a click
+- **The on-device model is tried first**, and it costs nothing at all
 - Currency and unit conversion never call DeepSeek at all
 - **Find a source** is free after *Explain this* — the term is already known. After *Explain
   this code* or *Summarise* it costs one extra call to work out the topics, and the Wikipedia
@@ -310,7 +351,11 @@ DeepSeek calls are cheap but not free, so:
 - Every answer is cached in `chrome.storage.local` keyed by
   `action + model + options + hash(text)`, for 7 days by default. Re-selecting the same text
   and pressing the same button is a storage read, not a request. Cached results are labelled
-  as such in the panel
+  as such in the panel, along with **on-device** when that is what answered — where a result
+  came from is not a detail, and it is invisible unless the panel says so. On-device answers
+  are cached too: they cost nothing but several seconds of inference, and `model` is part of
+  the key, so a local answer and a DeepSeek answer for the same selection can never be served
+  to each other
 - The cache holds 400 entries and evicts oldest-first
 
 Exchange rates come from [open.er-api.com](https://open.er-api.com) — the keyless endpoint of
@@ -335,15 +380,17 @@ src/
     numbers.js                grouping-aware number parse/format
     text.js                   "is this actually prose?" helpers
     hash.js                   FNV-1a + cache key builder
+    prompts.js                the prompts, shared by both providers
+    cache.js                  TTL + LRU cache over chrome.storage.local
   background/
     service-worker.js         message router, context menu
-    deepseek.js               chat-completions client + prompts (owns the key)
+    deepseek.js               chat-completions client (owns the key)
     wikipedia.js              term lookup + context ranking for "Find a source"
     rates.js                  exchange rate fetch + TTL cache
-    cache.js                  TTL + LRU cache over chrome.storage.local
   content/
     loader.js                 classic content script; imports main.js as a module
     main.js                   selection capture, shadow host, view stack, replace
+    local-ai.js               Chrome's built-in model; api.ai() tries it first
     kit.js                    el(), menu(), and the shared UI pieces
     icons.js                  monochrome 16px SVG glyphs
     qr.js                     QR encoder — byte mode, level M, versions 1-20
@@ -441,6 +488,38 @@ with a phone is the check that closes that gap.
 **Where the network lives.** Only the service worker. Content scripts send messages; they
 never hold the API key and never call `fetch` against DeepSeek.
 
+**Why the on-device model is the exception to that.** The rule exists because the worker owns
+the API key. There is no secret in a local model, so the argument doesn't apply — and the
+Prompt API is unavailable in worker contexts, so the worker couldn't run it regardless. The
+alternative is an offscreen document, which buys one central session at the cost of a
+permission and a lifecycle to manage; not worth it for a provider with nothing to hide. So
+`local-ai.js` runs in the page, and `cache.js` moved to `common/` because the content script
+now caches its own answers — content scripts can only import what
+`web_accessible_resources` lists, which covers `common/` and `content/` and deliberately not
+`background/`.
+
+**Why both providers share one set of prompts.** `common/prompts.js` is imported by the
+DeepSeek client and by `local-ai.js` alike. A tool should not change its mind about what it
+is depending on who answered, and the only way to guarantee that is for there to be one set
+of words. The task APIs are the exception — `Summarizer` and `Translator` take options rather
+than a prompt — which is why the key-points output is normalised back to the `• ` bullet the
+panel and the DeepSeek prompt both use.
+
+**Why `runLocal` returns null rather than throwing.** "I can't serve this one" is not a
+failure: no model, wrong language pair, a selection past the context window. Those are
+ordinary limits, and treating them as errors would mean `auto` couldn't fall through. It
+throws only when a session was created and then died. The one place that distinction is
+inverted is **on-device only**, where falling back would break the promise the setting makes,
+so there a refusal is reported.
+
+**Why availability probes are memoised and time-limited.** `Translator.availability()` for a
+real language pair was measured taking over eight seconds on a machine with no language pack
+installed. Unraced, that hangs a row; unmemoised, every AI click on a browser that has the
+APIs but not the model pays the timeout before falling back — which is most of the installed
+base, and would make the extension feel slower than before any of this existed. So probes are
+raced against 1.5s and cached for a minute. The TTL is what stops a freshly downloaded model
+needing every open tab reloaded before it is noticed.
+
 ### Adding a detector
 
 A detector decides whether it applies, then contributes menu rows:
@@ -517,7 +596,7 @@ New AI actions need a prompt in `buildPrompt()` in `src/background/deepseek.js` 
 node test/detectors.test.js
 ```
 
-242 assertions over number parsing, every detector's `matches()`, menu row construction,
+248 assertions over number parsing, every detector's `matches()`, menu row construction,
 ordering, the QR encoder and its round trip, the right-click menu's ids, and that every AI
 action a menu row can send has a prompt waiting for it — including a block that pins down
 what the catch-all detectors must *not* claim. No framework, no
@@ -528,7 +607,16 @@ The tests cover `matches()` and `items()`, which is where the fiddly logic lives
 lazy, so rows can be inspected without a DOM. The rendering and selection machinery is not
 covered — load the extension and try it.
 
+Node has none of the built-in AI globals, which makes it exactly the unsupported-browser case
+— so the provider tests assert the contract that matters there: `runLocal` *declines* rather
+than throwing, which is what lets `auto` fall through to DeepSeek. What Node cannot check is
+the on-device path actually working; that needs a browser with the model installed.
+
 ## Ideas not built
+
+[ROADMAP.md](ROADMAP.md) has the longer version — what the tools in this space do that this
+one doesn't, in phases, with the reasons for what was rejected. The table below is the
+short-list that predates it.
 
 Sketched and deliberately left out, roughly in order of how useful they'd be:
 
@@ -545,7 +633,20 @@ Sketched and deliberately left out, roughly in order of how useful they'd be:
 
 - **Language detection is a heuristic** (script ranges plus stopword counting). It only
   decides how prominently the Translate tab is ranked, never what gets translated, so a wrong
-  guess costs a tab position and nothing else.
+  guess costs a tab position and nothing else. It stays a heuristic because `matches()` is
+  synchronous by contract and the real `LanguageDetector` is not — that API is used where it
+  actually matters, picking the *source* language for an on-device translation, where a wrong
+  guess would translate from the wrong language rather than cost a row position.
+- **The on-device model has a small context window.** Selections over ~4,000 characters go to
+  DeepSeek instead (~12,000 for summarising, which the Summarizer handles separately).
+  Overflowing it produces a confident truncated answer rather than an error, which is the
+  worst failure mode available, so the limit is enforced before the call rather than hoped
+  about. On **on-device only** this means a long selection is refused rather than silently
+  half-read.
+- **On-device answers are not identical to DeepSeek's.** Gemini Nano is a much smaller model.
+  The prompts are the same and the output is cleaned the same way, but a summary will be
+  blunter and an explanation shorter. The panel labels which one answered so a surprising
+  result is at least attributable.
 - **A bare `$` is read as USD.** Distinguishing USD from CAD/AUD/etc. needs page context the
   extension doesn't have. Prefixed forms (`CA$`, `A$`, `US$`) are handled.
 - **Ambiguous unit abbreviations** (`in`, `m`, `t`, `st`, `pt`, `l`) only match at the end of a
