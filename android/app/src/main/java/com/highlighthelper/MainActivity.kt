@@ -3,26 +3,45 @@ package com.highlighthelper
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.highlighthelper.ui.LoadingRow
+import com.highlighthelper.ui.Note
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.*
+import kotlin.math.roundToInt
 
 /**
- * Settings, and the only reason this screen exists yet: somewhere to put the
- * DeepSeek API key.
+ * Settings.
  *
- * The extension's options page is a much larger thing — detector toggles,
- * search engines, custom tools, the highlight library. None of that is here.
- * What is here is the one setting without which nine of the twenty-two tools
- * cannot work at all, and saying so plainly beats a screen of switches that
- * imply more is wired up than is.
+ * The screen holds no opinions of its own. Every default, every detector, every
+ * language and every currency code comes off the `defaults` bridge method, which
+ * reads them from the same `src/common/settings.js` and detector registry the
+ * extension uses — so adding a detector or a currency to the shared source shows
+ * up here without anyone remembering to edit Kotlin. A hand-kept copy would not
+ * fail loudly when it fell behind; it would just quietly offer the wrong list.
+ *
+ * What is stored is the other half of the same idea: [SettingsStore] holds only
+ * the keys the user actually changed, and the engine merges them over its own
+ * DEFAULTS on the way in. So a value shown here is the override if there is one
+ * and the engine's default otherwise, and a setting the user has never touched
+ * keeps tracking the default when the default moves.
+ *
+ * `customTools` is deliberately absent — it needs a prompt editor, which is a
+ * screen rather than a row.
  */
 class MainActivity : ComponentActivity() {
 
@@ -33,72 +52,522 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface {
-                    var key by remember { mutableStateOf(app.secrets.apiKey) }
-                    var saved by remember { mutableStateOf(false) }
+                    SettingsScreen(app)
+                }
+            }
+        }
+    }
+}
 
-                    Column(
-                        Modifier
-                            .verticalScroll(rememberScrollState())
-                            .padding(24.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+/* ------------------------------------------------------------------ *
+ * The engine's answer
+ * ------------------------------------------------------------------ */
+
+/**
+ * The `defaults` payload, unpacked once.
+ *
+ * `languages` and `currencies` arrive as pairs of positional JSON arrays rather
+ * than objects, because they are the extension's own `[code, name]` tables
+ * crossing the bridge as they stand. Anything malformed is dropped rather than
+ * thrown on: a single bad row should cost one entry in a picker, not the whole
+ * settings screen.
+ */
+private class EngineDefaults(payload: JsonObject) {
+
+    val settings: JsonObject = payload["settings"]?.jsonObjectOrNull() ?: JsonObject(emptyMap())
+
+    val detectors: List<Pair<String, String>> =
+        payload["registry"]?.jsonArrayOrNull().orEmpty().mapNotNull { entry ->
+            val row = entry.jsonObjectOrNull() ?: return@mapNotNull null
+            val id = row["id"]?.text() ?: return@mapNotNull null
+            id to (row["title"]?.text() ?: id)
+        }
+
+    val languages: List<Pair<String, String>> = payload["languages"].asCodeNamePairs()
+
+    val currencies: List<Pair<String, String>> = payload["currencies"].asCodeNamePairs()
+
+    /** The per-detector defaults, which live under `settings`, not `detectors`. */
+    private val detectorDefaults: JsonObject =
+        settings["detectors"]?.jsonObjectOrNull() ?: JsonObject(emptyMap())
+
+    fun defaultFor(id: String): Boolean =
+        detectorDefaults[id]?.jsonPrimitive?.booleanOrNull ?: true
+}
+
+private fun JsonElement?.asCodeNamePairs(): List<Pair<String, String>> =
+    this?.jsonArrayOrNull().orEmpty().mapNotNull { entry ->
+        val pair = entry.jsonArrayOrNull() ?: return@mapNotNull null
+        val code = pair.getOrNull(0)?.text() ?: return@mapNotNull null
+        code to (pair.getOrNull(1)?.text() ?: code)
+    }
+
+private fun JsonElement.jsonObjectOrNull(): JsonObject? = this as? JsonObject
+private fun JsonElement.jsonArrayOrNull(): JsonArray? = this as? JsonArray
+private fun JsonElement.text(): String? = (this as? JsonPrimitive)?.contentOrNull
+
+/**
+ * One setting, read the way the engine will read it.
+ *
+ * Two lookups in a fixed order and nothing else. Writing it once here means no
+ * row can accidentally invent its own fallback, which is how the app and the
+ * engine would end up disagreeing about what "unset" means.
+ */
+private class Settings(private val overrides: JsonObject, val defaults: EngineDefaults) {
+
+    fun string(key: String): String =
+        (overrides[key] ?: defaults.settings[key])?.text().orEmpty()
+
+    fun int(key: String, fallback: Int): Int =
+        (overrides[key] ?: defaults.settings[key])?.let { (it as? JsonPrimitive)?.intOrNull }
+            ?: fallback
+
+    fun detectorOn(id: String): Boolean =
+        overrides["detectors"]?.jsonObjectOrNull()?.get(id)?.jsonPrimitive?.booleanOrNull
+            ?: defaults.defaultFor(id)
+}
+
+/* ------------------------------------------------------------------ *
+ * The screen
+ * ------------------------------------------------------------------ */
+
+@Composable
+private fun SettingsScreen(app: HighlightHelperApp) {
+
+    val scope = rememberCoroutineScope()
+
+    /*
+     * Asking the engine means starting a WebView and importing the module tree,
+     * which is the slowest thing on this screen by a wide margin. It runs in
+     * produceState so the API key section — the one setting that needs nothing
+     * from the engine — is usable immediately, and the rest fills in behind it.
+     */
+    val loaded by produceState<Result<EngineDefaults>?>(null) {
+        value = runCatching {
+            EngineDefaults(app.engine.call("defaults", JsonObject(emptyMap())) as JsonObject)
+        }
+    }
+
+    // Straight off DataStore rather than a local copy, so a save is reflected by
+    // the same read path that produced the value in the first place. There is no
+    // "I saved that, now let me also remember it" step to get wrong.
+    val overrides by app.settings.overrides.collectAsState(initial = null)
+
+    val save: (JsonObject) -> Unit = { patch -> scope.launch { app.settings.update(patch) } }
+
+    Column(
+        Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Highlight Helper", style = MaterialTheme.typography.headlineSmall)
+
+        Text(
+            "Select text in any app, then choose “Highlight” from the " +
+                "selection menu. It may be under the ⋮ overflow.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+        ApiKeySection(app)
+
+        val defaults = loaded?.getOrNull()
+        val current = overrides
+        when {
+            loaded?.isFailure == true -> {
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Note(
+                    "The detector engine did not start, so the rest of the " +
+                        "settings cannot be shown: they are read from it rather " +
+                        "than kept as a second copy here. " +
+                        loaded?.exceptionOrNull()?.message.orEmpty()
+                )
+            }
+
+            defaults == null || current == null ->
+                LoadingRow("Reading the defaults from the engine…")
+
+            else -> {
+                val settings = Settings(current, defaults)
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                ConversionsSection(settings, save)
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                LanguageSection(settings, save)
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                DetectorsSection(settings, save)
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                StorageSection(app, settings, save)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ApiKeySection(app: HighlightHelperApp) {
+    var key by remember { mutableStateOf(app.secrets.apiKey) }
+    var saved by remember { mutableStateOf(false) }
+
+    SectionHeader(
+        "DeepSeek API key",
+        "Needed for explain, translate, summarise, rewrite and the code " +
+            "tools. Conversions, the calculator, colours, dates, regex and the " +
+            "text tools all work without one."
+    )
+
+    OutlinedTextField(
+        value = key,
+        onValueChange = { key = it; saved = false },
+        label = { Text("sk-…") },
+        singleLine = true,
+        // Masked by default: this is a credential, and the
+        // screen it is typed on is over whatever app the
+        // user was reading.
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = {
+            app.secrets.apiKey = key
+            saved = true
+        }) { Text(if (saved) "Saved" else "Save") }
+
+        if (app.secrets.hasKey) {
+            OutlinedButton(onClick = {
+                app.secrets.apiKey = ""
+                key = ""
+                saved = false
+            }) { Text("Forget it") }
+        }
+    }
+
+    Text(
+        "Stored encrypted on this device, and sent only to " +
+            "api.deepseek.com. It never reaches the page the selection " +
+            "came from.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
+private fun ConversionsSection(settings: Settings, save: (JsonObject) -> Unit) {
+    SectionHeader(
+        "Conversions",
+        "What amounts and measurements are converted into when a selection " +
+            "contains one."
+    )
+
+    PickerSetting(
+        label = "Convert currency to",
+        options = settings.defaults.currencies,
+        selected = settings.string("targetCurrency"),
+        onPick = { save(buildJsonObject { put("targetCurrency", it) }) }
+    )
+
+    val imperial = settings.string("unitSystem") == "imperial"
+
+    ChoiceSetting(
+        label = "Units",
+        options = listOf("metric" to "Metric", "imperial" to "Imperial"),
+        selected = settings.string("unitSystem"),
+        onPick = { save(buildJsonObject { put("unitSystem", it) }) }
+    )
+
+    /*
+     * A UK pint is a fifth larger than a US one and the gallons differ by the
+     * same kind of margin, so this changes real answers — but only for imperial
+     * volumes. Left visible and disabled rather than hidden: a control that
+     * appears and vanishes as the switch above it moves reads as a glitch,
+     * whereas a greyed one with a reason explains what the switch just did.
+     */
+    ChoiceSetting(
+        label = "Imperial measures",
+        options = listOf("us" to "US", "uk" to "UK"),
+        selected = settings.string("imperialFlavor"),
+        enabled = imperial,
+        note = if (imperial) {
+            "Which gallon, pint and fluid ounce to use."
+        } else {
+            "Only used when units are set to imperial."
+        },
+        onPick = { save(buildJsonObject { put("imperialFlavor", it) }) }
+    )
+}
+
+@Composable
+private fun LanguageSection(settings: Settings, save: (JsonObject) -> Unit) {
+    SectionHeader(
+        "Language",
+        "Translations, definitions and encyclopedia lookups are produced in " +
+            "this language. It is not the language of the app itself."
+    )
+
+    PickerSetting(
+        label = "Translate into",
+        options = settings.defaults.languages,
+        selected = settings.string("language"),
+        onPick = { save(buildJsonObject { put("language", it) }) }
+    )
+}
+
+@Composable
+private fun DetectorsSection(settings: Settings, save: (JsonObject) -> Unit) {
+    SectionHeader(
+        "Detectors",
+        "Turning one off removes its rows from the sheet. Detection is the " +
+            "expensive part of opening the sheet, so switching off what you " +
+            "never use makes it open sooner as well as shorter."
+    )
+
+    settings.defaults.detectors.forEach { (id, title) ->
+        val on = settings.detectorOn(id)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Switch(
+                checked = on,
+                // Only this detector's key is written. The store merges
+                // `detectors` a level deeper than the rest for exactly this
+                // reason, so the other twenty-one keep whatever they had.
+                onCheckedChange = { next ->
+                    save(buildJsonObject {
+                        put("detectors", buildJsonObject { put(id, next) })
+                    })
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun StorageSection(
+    app: HighlightHelperApp,
+    settings: Settings,
+    save: (JsonObject) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    SectionHeader(
+        "Storage",
+        "Answers from the model are kept on this device so that re-selecting " +
+            "the same sentence is free and instant instead of another billed " +
+            "request."
+    )
+
+    val stored = settings.int("cacheDays", 0)
+
+    // Re-keyed on the stored value so a save re-seeds it, but untouched while a
+    // drag is in progress — otherwise the thumb would fight the recomposition
+    // caused by its own writes.
+    var days by remember(stored) { mutableFloatStateOf(stored.toFloat()) }
+
+    Text(
+        when (val d = days.roundToInt()) {
+            0 -> "Not cached — every request goes to DeepSeek"
+            1 -> "Kept for a day"
+            else -> "Kept for $d days"
+        },
+        style = MaterialTheme.typography.bodyMedium
+    )
+
+    Slider(
+        value = days,
+        onValueChange = { days = it },
+        // Written on release rather than on every frame of the drag: DataStore
+        // writes go to disk, and a slider dragged across the range would
+        // otherwise queue thirty of them for one decision.
+        onValueChangeFinished = { save(buildJsonObject { put("cacheDays", days.roundToInt()) }) },
+        valueRange = 0f..CACHE_DAYS_MAX,
+        steps = CACHE_DAYS_MAX.toInt() - 1,
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    var report by remember { mutableStateOf<String?>(null) }
+
+    OutlinedButton(onClick = {
+        scope.launch {
+            // Counted before the clear, because afterwards there is nothing left
+            // to count and "cleared everything" tells the user less than a
+            // number does about whether anything was there.
+            val dropped = app.cache.count()
+            app.cache.clear()
+            report = when (dropped) {
+                0 -> "Nothing was cached."
+                1 -> "Cleared 1 saved answer."
+                else -> "Cleared $dropped saved answers."
+            }
+        }
+    }) { Text("Clear cached answers") }
+
+    report?.let {
+        Text(
+            it,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private const val CACHE_DAYS_MAX = 30f
+
+/* ------------------------------------------------------------------ *
+ * Pieces
+ * ------------------------------------------------------------------ */
+
+@Composable
+private fun SectionHeader(title: String, blurb: String? = null) {
+    Text(title, style = MaterialTheme.typography.titleMedium)
+    if (blurb != null) {
+        Text(
+            blurb,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * A setting with more options than fit on the screen.
+ *
+ * A dialog rather than a dropdown because the currency list is every code the
+ * engine knows: a menu that long anchored to a row ends up taller than the
+ * phone, and a dialog is already the shape Android uses for "choose one of
+ * many".
+ */
+@Composable
+private fun PickerSetting(
+    label: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    onPick: (String) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+
+    // The code as well as the name, because "US Dollar" and "USD" are not
+    // equally recognisable and the second is what the converted row will say.
+    val shown = options.firstOrNull { it.first == selected }
+        ?.let { (code, name) -> "$name ($code)" }
+        ?: selected.ifEmpty { "—" }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(enabled = options.isNotEmpty()) { open = true }
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                shown,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+
+    if (open) {
+        OptionDialog(
+            title = label,
+            options = options,
+            selected = selected,
+            onPick = { open = false; onPick(it) },
+            onDismiss = { open = false }
+        )
+    }
+}
+
+@Composable
+private fun OptionDialog(
+    title: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // Opened at whatever is already chosen. A list of every currency opened at
+    // the top would show the user AED and leave them to find out for themselves
+    // what the setting currently is.
+    val start = options.indexOfFirst { it.first == selected }.coerceAtLeast(0)
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = start)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            LazyColumn(state = state, modifier = Modifier.heightIn(max = 400.dp)) {
+                items(options, key = { it.first }) { (code, name) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(code) }
+                            .padding(vertical = 4.dp)
                     ) {
-                        Text("Highlight Helper", style = MaterialTheme.typography.headlineSmall)
-
-                        Text(
-                            "Select text in any app, then choose “Highlight” from the " +
-                                "selection menu. It may be under the ⋮ overflow.",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-
-                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-
-                        Text("DeepSeek API key", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Needed for explain, translate, summarise, rewrite and the " +
-                                "code tools. Conversions, the calculator, colours, dates, " +
-                                "regex and the text tools all work without one.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        OutlinedTextField(
-                            value = key,
-                            onValueChange = { key = it; saved = false },
-                            label = { Text("sk-…") },
-                            singleLine = true,
-                            // Masked by default: this is a credential, and the
-                            // screen it is typed on is over whatever app the
-                            // user was reading.
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                app.secrets.apiKey = key
-                                saved = true
-                            }) { Text(if (saved) "Saved" else "Save") }
-
-                            if (app.secrets.hasKey) {
-                                OutlinedButton(onClick = {
-                                    app.secrets.apiKey = ""
-                                    key = ""
-                                    saved = false
-                                }) { Text("Forget it") }
-                            }
-                        }
-
-                        Text(
-                            "Stored encrypted on this device, and sent only to " +
-                                "api.deepseek.com. It never reaches the page the selection " +
-                                "came from.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        RadioButton(selected = code == selected, onClick = { onPick(code) })
+                        Spacer(Modifier.width(4.dp))
+                        Text(name, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+/** A setting with two or three options, all of which fit on the row. */
+@Composable
+private fun ChoiceSetting(
+    label: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    onPick: (String) -> Unit,
+    enabled: Boolean = true,
+    note: String? = null
+) {
+    val dimmed = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+
+    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = dimmed)
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            options.forEach { (value, title) ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clickable(enabled = enabled) { onPick(value) }
+                        .padding(end = 12.dp)
+                ) {
+                    RadioButton(
+                        selected = value == selected,
+                        enabled = enabled,
+                        onClick = { onPick(value) }
+                    )
+                    Text(title, style = MaterialTheme.typography.bodyMedium, color = dimmed)
+                }
+            }
+        }
+
+        if (note != null) {
+            Text(
+                note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

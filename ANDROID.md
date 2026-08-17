@@ -30,9 +30,27 @@ knowing before changing them:
 every build. That directory is generated and gitignored — never edit it, and never commit
 it. `src/` at the repo root is the only copy of the detectors.
 
-To run it you need an emulator image or a physical device; neither is installed here.
-Android Studio's Device Manager will fetch a system image, or a phone with USB debugging
-works with `adb install`.
+Open `android/` in Android Studio, not the repo root — there is no `settings.gradle.kts` at
+the top level, so Studio finds no Gradle project there and the Run button stays greyed out.
+
+To run it you need an emulator image or a physical device. Android Studio's Device Manager
+will fetch a system image, or a connected phone works with `./gradlew :app:installDebug`.
+
+### Tests
+
+```bash
+npm test                              # detectors, then the bridge, in Node
+cd android && ./gradlew test          # the response cache, on the JVM
+```
+
+The bridge smoke test runs the real detectors against a stubbed `AndroidHost`, which is what
+lets the risky half of this port be checked without a device: rows crossing as JSON, prompts
+being built in JS, settings reaching detectors, submenu keys surviving. The Gradle test
+covers the cache, whose failures are all silent ones — a stale answer looks exactly like a
+fresh one.
+
+Neither replaces running it. What no test here touches: the WebView actually loading, the
+selection toolbar entry appearing, replacement landing in another app's text field.
 
 ---
 

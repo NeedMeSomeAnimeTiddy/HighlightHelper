@@ -14,6 +14,8 @@ securityCrypto = "1.1.0"
 okhttp = "5.5.0"
 browser = "1.10.0"
 serialization = "1.11.0"
+junit = "4.13.2"
+coroutinesTest = "1.10.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +41,11 @@ androidx-security-crypto = { group = "androidx.security", name = "security-crypt
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
+
+# Test only. The cache is pure JVM logic and its failures are silent, so it is
+# checked without an emulator in the loop.
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutinesTest" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

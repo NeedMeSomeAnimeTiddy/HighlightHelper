@@ -279,6 +279,67 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
     hostCalls.some((c) => c.type === 'hh:define'), false);
 }
 
+/*
+ * Settings reach the detectors.
+ *
+ * This is the regression that made the app give wrong answers rather than
+ * fewer: the sheet sent an empty object, so every conversion ran on DEFAULTS
+ * and a British user selecting "$50" was told it was already in their currency.
+ * Overrides only — the engine merges them over DEFAULTS itself.
+ */
+{
+  const { rows } = await call('detect', {
+    text: 'It cost $50',
+    settings: { targetCurrency: 'GBP' }
+  });
+  check('a currency override reaches the row',
+    rows.find((r) => r.key === 'currency').label, 'Convert to GBP');
+}
+/*
+ * `unitSystem` picks the family a conversion aims at when there is a genuine
+ * choice — it does not stop miles converting to km, because converting out of
+ * the source unit is the point. A temperature in kelvin is the case where the
+ * preference actually decides the answer.
+ */
+{
+  const metric = await call('detect', { text: '300 K', settings: { unitSystem: 'metric' } });
+  const imperial = await call('detect', { text: '300 K', settings: { unitSystem: 'imperial' } });
+  check('unitSystem chooses the target family',
+    [metric.rows.find((r) => r.key === 'unit').value.text,
+     imperial.rows.find((r) => r.key === 'unit').value.text],
+    ['26.9 °C', '80.3 °F']);
+}
+{
+  const us = await call('detect', { text: '5 gal', settings: { imperialFlavor: 'us' } });
+  const uk = await call('detect', { text: '5 gal', settings: { imperialFlavor: 'uk' } });
+  check('and a gallon is not the same on both sides of the Atlantic',
+    [us.rows.find((r) => r.key === 'unit').value.text,
+     uk.rows.find((r) => r.key === 'unit').value.text],
+    ['18.93 L', '22.73 L']);
+}
+{
+  const { rows } = await call('detect', {
+    text: 'It cost $50',
+    settings: { detectors: { currency: false } }
+  });
+  check('a detector switched off contributes nothing',
+    rows.some((r) => r.key === 'currency'), false);
+}
+
+/*
+ * The settings screen asks the engine what the defaults are rather than
+ * keeping a Kotlin copy, so this is the payload it depends on.
+ */
+{
+  const info = await call('defaults');
+  check('defaults carry the real settings object',
+    info.settings.targetCurrency, 'USD');
+  check('every registered detector is offered as a toggle',
+    info.registry.length, 22);
+  check('and the pickers get their lists',
+    [info.languages.length > 5, info.currencies.length > 20], [true, true]);
+}
+
 /* ---------- report ---------- */
 
 console.log(`${passed} passed, ${failures.length} failed`);

@@ -40,6 +40,16 @@ fun SelectionSheet(
     canReplace: Boolean,
     engine: DetectorEngine,
     services: HostServices,
+    /**
+     * The user's overrides, not a whole settings object — the engine merges
+     * them over its own DEFAULTS, so an empty object means "all defaults".
+     *
+     * Null while they are still being read off disk. Detection waits for that
+     * rather than running on defaults and correcting itself a moment later:
+     * the row would say "Already in USD" and then change its mind, which looks
+     * like a bug even though the second answer is right.
+     */
+    settings: JsonObject?,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -56,13 +66,14 @@ fun SelectionSheet(
      * resolve late and the panel is built for it; the same is true here, and it
      * is what makes a cold engine survivable.
      */
-    LaunchedEffect(text) {
+    LaunchedEffect(text, settings) {
+        if (settings == null) return@LaunchedEffect
         engine.services = services
         runCatching {
             val args = buildJsonObject {
                 put("text", text)
                 put("canReplace", canReplace)
-                put("settings", JsonObject(emptyMap()))
+                put("settings", settings)
             }
             json.decodeFromJsonElement<Detection>(engine.call("detect", args))
         }.onSuccess {

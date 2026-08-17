@@ -4,6 +4,9 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import kotlinx.serialization.json.JsonObject
 import androidx.lifecycle.lifecycleScope
 import com.highlighthelper.engine.HostServices
 import com.highlighthelper.ui.SelectionSheet
@@ -37,15 +40,18 @@ class ShareActivity : ComponentActivity() {
             rates = app.rates,
             deepSeek = app.deepSeek,
             http = app.http,
+            cache = app.cache,
             onReplace = { false }
         )
 
         setContent {
+            val settings by produceState<JsonObject?>(null) { value = app.settings.current() }
             SelectionSheet(
                 text = shared,
                 canReplace = false,
                 engine = app.engine,
                 services = services,
+                settings = settings,
                 onDismiss = { finish() }
             )
         }

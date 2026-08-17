@@ -22,11 +22,13 @@
  * cannot be JSON stays on this side of it.
  */
 
-import { detect, getDetector } from './src/content/detectors/index.js';
+import { detect, getDetector, LIST } from './src/content/detectors/index.js';
 import { DEFAULTS } from './src/common/settings.js';
 import { buildPrompt, cleanOutput } from './src/common/prompts.js';
 import { lookup, searchLinks, wikiLang } from './src/background/wikipedia.js';
 import { define, synonyms, dictionaryLinks, wiktLang } from './src/background/dictionary.js';
+import { LANGUAGES } from './src/common/languages.js';
+import { CURRENCY_CODES, currencyName } from './src/common/currencies.js';
 
 /* ------------------------------------------------------------------ *
  * Calling out to Kotlin
@@ -458,6 +460,33 @@ const METHODS = {
   /** Lets Kotlin ask what a detector is called without hard-coding the list. */
   detectorTitle({ id }) {
     return getDetector(id)?.title || id;
+  },
+
+  /**
+   * The default settings, and the list of detectors, read from the source.
+   *
+   * The settings screen needs to know what a preference falls back to and what
+   * detectors exist. Both are already stated once — in `DEFAULTS` and in the
+   * detector registry — so Kotlin asks rather than keeping a second copy that
+   * would quietly disagree the first time a detector is added.
+   *
+   * It is also why the store on the Kotlin side holds only the user's
+   * *overrides*: the engine merges them over DEFAULTS itself, exactly as
+   * `getSettings()` does in the extension.
+   */
+  defaults() {
+    return {
+      settings: DEFAULTS,
+      // `registry`, not `detectors`: `settings.detectors` in the same payload
+      // is the on/off map, and two things a caller reaches for by the same name
+      // meaning different shapes is a trap worth not setting.
+      registry: LIST.map((d) => ({ id: d.id, title: d.title })),
+      // The pickers' contents, for the same reason: these lists are long,
+      // they already exist, and a hand-maintained Kotlin copy would be wrong
+      // the first time one of them changed.
+      languages: LANGUAGES,
+      currencies: [...CURRENCY_CODES].sort().map((code) => [code, currencyName(code)])
+    };
   }
 };
 

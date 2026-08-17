@@ -19,6 +19,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
@@ -41,6 +43,9 @@ class HostServices(
     private val rates: RatesService,
     private val deepSeek: DeepSeekService,
     private val http: HttpService,
+    private val cache: ResponseCache,
+    /** From the user's `cacheDays`; zero switches caching off entirely. */
+    private val cacheTtlMs: Long = ResponseCache.DEFAULT_TTL_MS,
     /** Set when the selection came from an editable field — see ProcessTextActivity. */
     private val onReplace: (String) -> Boolean
 ) {
@@ -91,10 +96,50 @@ class HostServices(
              * out from the WebView, so there is one place where this app
              * talks to the network.
              */
-            "http" -> http.get(message["url"]?.jsonPrimitive?.contentOrNull.orEmpty())
+            "http" -> {
+                val url = message["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val key = ResponseCache.keyFor("http", url)
+
+                cache.get(key, cacheTtlMs)?.let { return json.parseToJsonElement(it).jsonObject }
+
+                http.get(url).also { response ->
+                    // A definite answer is cached either way: a word with no
+                    // Wiktionary entry today has none tomorrow. A transport
+                    // failure is not, or one rate-limit would leave a term
+                    // answering "no such thing" for a week — the same rule the
+                    // service worker follows.
+                    val status = response["status"]?.jsonPrimitive?.int ?: 0
+                    if (status == 200 || status == 404) cache.put(key, response.toString())
+                }
+            }
 
             "ai", "chat" -> {
                 val streaming = message["stream"]?.jsonPrimitive?.booleanOrNull == true
+
+                /*
+                 * Everything that changes the answer is in the key, including
+                 * the whole prompt — so a reworded system prompt invalidates
+                 * the entries it would otherwise have poisoned, and a second
+                 * call in a different target language is not served the first
+                 * one's reply.
+                 *
+                 * A hit is returned whole even for a streaming request. It is
+                 * already complete, and dribbling it back a token at a time to
+                 * look busy would be theatre.
+                 */
+                val key = ResponseCache.keyFor(
+                    message.str("model"),
+                    message.str("system"),
+                    message.str("user"),
+                    message["messages"]?.toString()
+                )
+
+                cache.get(key, cacheTtlMs)?.let { hit ->
+                    return buildJsonObject {
+                        put("ok", true); put("text", hit); put("cached", true)
+                    }
+                }
+
                 try {
                     // Passing a non-null callback is what selects the streaming
                     // request, so it has to actually be null when it is not
@@ -104,7 +149,11 @@ class HostServices(
                         if (streaming) ({ soFar -> _streaming.value = soFar }) else null
 
                     deepSeek.complete(message, onChunk)
-                        .also { if (streaming) _streaming.value = null }
+                        .also { result ->
+                            if (streaming) _streaming.value = null
+                            result.str("text")?.takeIf { it.isNotBlank() }
+                                ?.let { cache.put(key, it) }
+                        }
                 } catch (err: Throwable) {
                     _streaming.value = null
                     throw err
@@ -116,6 +165,8 @@ class HostServices(
     }
 
     private fun ok() = buildJsonObject { put("ok", true) }
+
+    private fun JsonObject.str(key: String) = this[key]?.jsonPrimitive?.contentOrNull
 
     private fun copy(text: String) {
         val clipboard = context.getSystemService<ClipboardManager>() ?: return

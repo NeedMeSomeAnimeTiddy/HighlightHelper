@@ -7,7 +7,9 @@ import com.highlighthelper.engine.DeepSeekService
 import com.highlighthelper.engine.DetectorEngine
 import com.highlighthelper.engine.HttpService
 import com.highlighthelper.engine.RatesService
+import com.highlighthelper.engine.ResponseCache
 import com.highlighthelper.engine.SecureStore
+import com.highlighthelper.engine.SettingsStore
 
 /**
  * Holds the engine across activities.
@@ -29,6 +31,8 @@ class HighlightHelperApp : Application() {
     val http: HttpService by lazy { HttpService() }
     val secrets: SecureStore by lazy { SecureStore(this) }
     val deepSeek: DeepSeekService by lazy { DeepSeekService(secrets) }
+    val settings: SettingsStore by lazy { SettingsStore(this) }
+    val cache: ResponseCache by lazy { ResponseCache(this) }
 
     override fun onCreate() {
         super.onCreate()
