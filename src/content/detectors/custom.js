@@ -11,7 +11,7 @@
  * common/prompts.js for why the selection stays in its own turn.
  */
 
-import { el, streamView, actionRow, provenance, followUp, menu, textBlock } from '../kit.js';
+import { el, provenance, followUp } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { fillTemplate } from '../../common/prompts.js';
 import { looksLikeLanguage } from '../../common/text.js';
@@ -42,51 +42,78 @@ export default {
     return { tools };
   },
 
-  items({ text, match, settings, api }) {
-    const context = {
-      title: api?.context?.title || '',
-      url: api?.context?.url || '',
-      language: settings.language
-    };
-
-    const rows = match.tools.map((tool) => ({
+  rows({ text, match, settings }) {
+    const toolRows = match.tools.map((tool) => ({
       key: keyFor(tool.id),
       icon: 'custom',
       label: tool.name,
       detailTitle: tool.name,
-      open: (ctx) => runView(text, tool, context, ctx)
+      detail: runDetail(text, tool, settings.language)
     }));
 
     // One tool is a row; several are a drill-in. A user with six of them should
-    // not have six rows above every detector that recognised something.
-    if (rows.length === 1) return rows;
+    // not have six rows above every detector that recognised something. The
+    // drill-in keeps the `custom:<id>` keys underneath it, which is what a
+    // right-click entry for one particular tool resolves against.
+    if (toolRows.length === 1) return toolRows;
 
     return [{
       key: 'custom',
       icon: 'custom',
       label: 'My tools',
-      value: String(rows.length),
+      value: String(toolRows.length),
       detailTitle: 'My tools',
-      open: (ctx) => menu(rows, ctx)
+      detail: { kind: 'menu', rows: toolRows }
     }];
   }
 };
 
-function runView(text, tool, context, api) {
-  const systemPrompt = fillTemplate(tool.prompt, context);
+function runDetail(text, tool, language) {
+  /*
+   * `{title}` and `{url}` come from the page, and `rows` is handed no api to
+   * read them from — deliberately, since it must return data a non-browser can
+   * consume. `run` and `done` both receive one, so the template is filled at
+   * the moment the tool is actually invoked instead of when the row is built.
+   */
+  const systemPromptFor = (api) => fillTemplate(tool.prompt, {
+    title: api?.context?.title || '',
+    url: api?.context?.url || '',
+    language
+  });
 
-  return streamView(
-    `${tool.name}…`,
-    (emit) => api.ai(AI.CUSTOM, text, { systemPrompt }, emit),
-    (res) => {
-      const view = el('div', {},
-        el('div', { class: 'hh-label', text: `${tool.name}${provenance(res)}` }),
-        textBlock(res.text),
-        actionRow(res.text, api)
-      );
-      followUp({ system: systemPrompt, source: text, answer: res.text }, api, view);
-      return view;
-    },
-    (err, retry) => api.errorFor(err, retry)
-  );
+  return {
+    kind: 'stream',
+    loading: `${tool.name}…`,
+    run: (api, emit) => api.ai(AI.CUSTOM, text, { systemPrompt: systemPromptFor(api) }, emit),
+    done: (res) => [
+      { type: 'label', text: `${tool.name}${provenance(res)}` },
+      { type: 'text', text: res.text, rich: true },
+      { type: 'actions', text: res.text },
+      {
+        /*
+         * The follow-up thread, and only the follow-up thread.
+         *
+         * Copy/Replace above is an ordinary actions block; this one is not,
+         * because a conversation owns state across turns — the message list
+         * grows, a failed turn is rolled back off it, and the input is live.
+         * There is no way to describe that as static data, so it stays DOM.
+         *
+         * Nothing is lost on Android by this today, because the AI path is not
+         * wired up there at all yet. When it is, this becomes a real
+         * conversation view, and that is the right moment to design one.
+         */
+        type: 'custom',
+        note: 'Follow-up questions need the browser panel.',
+        render: (api) => {
+          const host = el('div', {});
+          followUp(
+            { system: systemPromptFor(api), source: text, answer: res.text },
+            api,
+            host
+          );
+          return host;
+        }
+      }
+    ]
+  };
 }

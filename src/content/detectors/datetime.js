@@ -10,7 +10,6 @@
  * or a bare "12/03" would produce a confident, wrong answer.
  */
 
-import { el, replaceContent } from '../kit.js';
 
 const MAX_LEN = 80;
 
@@ -75,7 +74,7 @@ export default {
     return found ? { ...found } : null;
   },
 
-  items({ match }) {
+  rows({ match }) {
     const opts = match.dateOnly
       ? { dateStyle: 'full' }
       : { dateStyle: 'medium', timeStyle: 'short' };
@@ -86,35 +85,33 @@ export default {
       label: 'Your local time',
       value: match.date.toLocaleString(undefined, opts),
       detailTitle: match.kind,
-      open: () => detailView(match)
+      detail: { kind: 'blocks', blocks: detailBlocks(match) }
     }];
   }
 };
 
-function detailView(match) {
+function detailBlocks(match) {
   const { date } = match;
-  const box = el('div', { class: 'hh-detail' });
 
-  const facts = [
-    ['Local', date.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'medium' })],
-    ['UTC', date.toUTCString().replace(' GMT', ' UTC')],
-    ['ISO 8601', date.toISOString()],
-    ['Unix seconds', String(Math.floor(date.getTime() / 1000))],
-    ['Unix ms', String(date.getTime())]
+  return [
+    {
+      // The date is the answer and the time trails it as a detail, which is
+      // what `trailing` is for — an arrow here would imply a conversion
+      // between two things that are not being converted.
+      type: 'headline',
+      text: date.toLocaleDateString(undefined, { dateStyle: 'medium' }),
+      trailing: date.toLocaleTimeString(undefined, { timeStyle: 'short' })
+    },
+    { type: 'sub', text: `${relative(date)} · read as ${match.kind}` },
+    {
+      type: 'facts',
+      items: [
+        { label: 'Local', value: date.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'medium' }), mono: true },
+        { label: 'UTC', value: date.toUTCString().replace(' GMT', ' UTC'), mono: true },
+        { label: 'ISO 8601', value: date.toISOString(), mono: true },
+        { label: 'Unix seconds', value: String(Math.floor(date.getTime() / 1000)), mono: true },
+        { label: 'Unix ms', value: String(date.getTime()), mono: true }
+      ]
+    }
   ];
-
-  replaceContent(box,
-    el('div', { class: 'hh-headline' },
-      el('span', { text: date.toLocaleDateString(undefined, { dateStyle: 'medium' }) }),
-      el('span', { class: 'hh-from', text: date.toLocaleTimeString(undefined, { timeStyle: 'short' }) })
-    ),
-    el('p', { class: 'hh-sub', text: `${relative(date)} · read as ${match.kind}` }),
-    el('div', { class: 'hh-facts' },
-      ...facts.map(([label, value]) => el('div', { class: 'hh-fact' },
-        el('em', { text: label }),
-        el('span', { class: 'hh-mono', text: value })
-      ))
-    )
-  );
-  return box;
 }

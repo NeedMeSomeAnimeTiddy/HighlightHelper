@@ -41,13 +41,24 @@ export { glyph };
  *     key,                  unique id, used to open a view programmatically
  *     icon,                 glyph name from icons.js
  *     label,                row text
- *     value,                optional right-hand result: string | Promise<string>
+ *     value,                right-hand result: string | Promise<string> | { task }
  *     detailTitle,          header for the drilled-in view (defaults to label)
- *     open(api) -> Node     omit for a static, non-clickable row
+ *     detail,               a view spec — see renderView. Preferred.
+ *     open(api) -> Node     the older, DOM-returning form. Still supported.
  *   }
+ *
+ * `detail` and `open` are the same idea in two forms. `open` builds DOM, which
+ * only a browser can do; `detail` describes what to build, which anything can.
+ * The Android app renders the same rows natively and cannot call `open`, so new
+ * detectors describe and old ones still build — see `rows()` in detectors/index.js.
+ *
+ * `value` as `{ task }` is the lazy form of the Promise: the work starts when
+ * the row renders rather than when the row is constructed. Detection runs on
+ * every selection, so a row that costs a network call must not start one just by
+ * existing — `matches()` deciding a row applies is not the user asking for it.
  */
 function itemRow(item, api) {
-  const clickable = typeof item.open === 'function';
+  const clickable = typeof item.open === 'function' || Boolean(item.detail);
   const row = el(clickable ? 'button' : 'div', {
     class: `hh-item${clickable ? '' : ' hh-item--static'}`,
     ...(clickable ? { type: 'button', role: 'menuitem', tabindex: '-1' } : {})
@@ -57,9 +68,13 @@ function itemRow(item, api) {
   row.append(el('span', { class: 'hh-lab', text: item.label }));
 
   const value = el('span', { class: 'hh-val' });
-  if (item.value instanceof Promise) {
+  const pending = item.value instanceof Promise
+    ? item.value
+    : (typeof item.value?.task === 'function' ? item.value.task(api) : null);
+
+  if (pending) {
     value.append(el('span', { class: 'hh-dots', 'aria-label': 'Loading' }));
-    item.value.then(
+    Promise.resolve(pending).then(
       (v) => { value.replaceChildren(document.createTextNode(v ?? '—')); },
       () => {
         value.replaceChildren(glyph('warn', 'hh-glyph hh-glyph--warn'));
@@ -74,11 +89,18 @@ function itemRow(item, api) {
   if (clickable) {
     row.append(glyph('chevronRight', 'hh-glyph hh-chev'));
     row.addEventListener('click', () => {
-      api.push(item.detailTitle || item.label, item.open(api));
+      api.push(item.detailTitle || item.label, openRow(item, api));
     });
   }
 
   return row;
+}
+
+/** The node a row drills into, whichever form the detector used. */
+export function openRow(item, api) {
+  return typeof item.open === 'function'
+    ? item.open(api)
+    : renderView(item.detail, api);
 }
 
 /**
@@ -93,6 +115,210 @@ export function menu(items, api) {
   for (const item of items) list.append(itemRow(item, api));
   list.hhItems = items;
   return list;
+}
+
+/* ------------------------------------------------------------------ *
+ * View specs
+ *
+ * A detail view described as data rather than built as DOM, so that the same
+ * detector can drive the extension's panel and the Android app's bottom sheet
+ * without either one owning the other's widgets.
+ *
+ * A spec is one of four kinds:
+ *
+ *   { kind: 'blocks', blocks }                     static content
+ *   { kind: 'menu',   rows }                       a nested submenu
+ *   { kind: 'async',  loading, run }               spinner, then blocks
+ *   { kind: 'stream', loading, run, done }         tokens as they arrive
+ *
+ * `run` and `done` are ordinary functions. They are never serialised — the JS
+ * runs in-process on both platforms, so a spec crossing to Kotlin carries an id
+ * and the bridge calls back in. What must not appear in a spec is a DOM node,
+ * because that is the one thing the other side cannot use.
+ * ------------------------------------------------------------------ */
+
+/** Blocks, in the order a detail view tends to use them. */
+const BLOCKS = {
+  label: (b) => el('div', { class: 'hh-label', text: b.text }),
+
+  note: (b) => note(b.text, b.variant || ''),
+
+  quote: (b) => quote(b.text),
+
+  /**
+   * Three shapes, because the panel genuinely has three.
+   *
+   * `from` is a conversion: muted source, arrow, prominent result. `trailing`
+   * is the other way round — the answer first, with a detail hanging off it
+   * (a date and the time it was at), where an arrow would imply a conversion
+   * that isn't happening. Neither is the plain single-value case.
+   */
+  headline: (b) => {
+    if (b.from != null) {
+      return el('div', { class: 'hh-headline' },
+        el('span', { class: 'hh-from', text: b.from }),
+        el('span', { class: 'hh-arrow', text: b.op || '→' }),
+        el('span', { text: b.text }));
+    }
+    if (b.trailing != null) {
+      return el('div', { class: 'hh-headline' },
+        el('span', { text: b.text }),
+        el('span', { class: 'hh-from', text: b.trailing }));
+    }
+    return el('div', { class: 'hh-headline', text: b.text });
+  },
+
+  sub: (b) => el('p', { class: 'hh-sub', text: b.text }),
+
+  /**
+   * Label/value pairs. `mono` sets the value in the monospaced face; `monoLabel`
+   * does the same to the label, which is what a regex flag or a header name
+   * needs — there the token is the code and the prose is the explanation.
+   */
+  facts: (b) => el('div', { class: 'hh-facts' },
+    ...(b.label ? [el('div', { class: 'hh-label', text: b.label })] : []),
+    ...b.items.map((f) => el('div', { class: 'hh-fact' },
+      el('em', { class: f.monoLabel ? 'hh-mono' : '', text: f.label }),
+      el('span', { class: f.mono ? 'hh-mono' : '', text: f.value })))),
+
+  /**
+   * An indented breakdown — the regex explainer, and the only view whose
+   * structure carries meaning that `facts` throws away.
+   *
+   * Nesting depth is the whole point: `(a(b))` is not the same pattern as
+   * `(a)(b)`, and a flat list of tokens says they are. The panel already has
+   * `.hh-step` styling for this, so the block exists to describe what was
+   * always being drawn rather than to invent something.
+   */
+  steps: (b) => el('div', { class: 'hh-steps' },
+    ...b.items.map((s) => el('div', {
+      class: 'hh-step',
+      style: `padding-left:${(s.depth || 0) * 11}px`
+    },
+      el('code', { class: 'hh-mono hh-step-token', text: s.token }),
+      el('span', { class: 'hh-step-text', text: s.description })))),
+
+  /**
+   * A block of code, in the monospaced boxed style.
+   *
+   * Distinct from `text` because code is the one kind of answer where the
+   * whitespace is load-bearing — a commented function rendered in a
+   * proportional face that wraps is not the thing the user asked to copy.
+   */
+  code: (b) => el('pre', { class: 'hh-code', text: b.text }),
+
+  /**
+   * A run of text. `rich` sends it through the markdown reader — model output
+   * only. `dim` is the continuation case: the original in grey, the new text
+   * after it, so it is obvious which half the model wrote.
+   */
+  text: (b) => (b.dim
+    ? el('div', { class: 'hh-text' },
+        el('span', { class: 'hh-dim', text: b.dim }), ' ', el('span', { text: b.text }))
+    : (b.rich ? textBlock(b.text) : el('div', { class: 'hh-text', text: b.text }))),
+
+  swatch: (b) => {
+    const chip = el('div', { class: 'hh-swatch' });
+    chip.style.setProperty('--swatch', b.css);
+    return el('div', { class: 'hh-swatch-row' }, chip,
+      el('div', {},
+        el('div', { class: 'hh-headline', text: b.title }),
+        b.sub ? el('p', { class: 'hh-sub', text: b.sub }) : null));
+  },
+
+  actions: (b, api) => actionRow(b.text, api,
+    (b.extra || []).map((x) => btn(x.label, () => x.run(api), { icon: x.icon }))),
+
+  /**
+   * A row of buttons. An item is either a copy button — `{ copy: text }` — or
+   * an ordinary one, `{ label, icon, variant, run(api) }`.
+   *
+   * Copy is called out rather than left as another `run` because it is not just
+   * another callback: it confirms on itself, flipping its own label to "Copied"
+   * for a moment instead of raising a toast. Expressing that as a generic
+   * button would lose the confirmation, and a `confirm` flag on every button
+   * would push the exception onto the twenty that never need it. Naming it also
+   * gives a native renderer something it can map to a real copy affordance
+   * rather than an opaque callback — and it can appear anywhere in the row,
+   * which a copy-only block could not.
+   */
+  buttons: (b, api) => el('div', { class: 'hh-row' },
+    ...b.items.map((x) => (x.copy != null
+      ? copyButton(x.copy, api)
+      : btn(x.label, () => x.run(api), { icon: x.icon, variant: x.variant || '' })))),
+
+  menu: (b, api) => menu(b.rows, api),
+
+  /**
+   * The escape hatch, and deliberately part of the contract rather than a gap
+   * in it. A few views are genuinely browser-shaped — the QR canvas, the
+   * "Find a source" panel — and forcing them into block types nothing else uses
+   * would make the vocabulary worse for the twenty views that fit it. Android
+   * skips a block it has no renderer for and says so, which is the honest
+   * outcome: a missing panel, not a crash.
+   */
+  custom: (b, api) => b.render(api)
+};
+
+function block(spec, api) {
+  const make = BLOCKS[spec?.type];
+  if (!make) {
+    console.warn('[Highlight Helper] unknown block type:', spec?.type);
+    return null;
+  }
+  return make(spec, api);
+}
+
+export function blocks(list, api) {
+  return (list || []).map((b) => block(b, api)).filter(Boolean);
+}
+
+/** A view spec, rendered into the panel. */
+export function renderView(spec, api) {
+  if (!spec) return note('Nothing to show.');
+
+  switch (spec.kind) {
+    case 'menu':
+      return menu(spec.rows, api);
+
+    /*
+     * Both of these re-measure once the result lands.
+     *
+     * The panel's resting height is `auto`, so content that arrives late is
+     * never clipped — but the view was measured and animated to while it was
+     * still a spinner, and the panel is positioned from that measurement. Left
+     * alone, a long answer grows downwards off the bottom of the viewport
+     * instead of the panel flipping above the selection. Several of the
+     * hand-built views called `api.resize()` for exactly this; doing it here
+     * means none of them has to remember.
+     */
+    case 'async':
+      return asyncView(
+        spec.loading || 'Working…',
+        async () => {
+          const node = el('div', {}, ...blocks(await spec.run(api), api));
+          queueMicrotask(() => api.resize?.());
+          return node;
+        },
+        (err, retry) => api.errorFor(err, retry)
+      );
+
+    case 'stream':
+      return streamView(
+        spec.loading || 'Working…',
+        (emit) => spec.run(api, emit),
+        (res) => {
+          const node = el('div', {}, ...blocks(spec.done(res, api), api));
+          queueMicrotask(() => api.resize?.());
+          return node;
+        },
+        (err, retry) => api.errorFor(err, retry)
+      );
+
+    case 'blocks':
+    default:
+      return el('div', { class: 'hh-detail' }, ...blocks(spec.blocks, api));
+  }
 }
 
 /* ------------------------------------------------------------------ *

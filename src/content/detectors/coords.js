@@ -11,8 +11,6 @@
  * and does not tie the lookup to a profile.
  */
 
-import { el, replaceContent, btn, copyButton } from '../kit.js';
-
 const MAX_LEN = 80;
 
 const DEC = String.raw`[+-]?\d{1,3}(?:\.\d+)?`;
@@ -93,7 +91,9 @@ export default {
     return found;
   },
 
-  items({ match }) {
+  rows({ match }) {
+    // The row shows whichever notation the selection wasn't written in, so the
+    // answer is the half you couldn't already read.
     const decimal = `${match.lat.toFixed(5)}, ${match.lon.toFixed(5)}`;
     return [{
       key: 'coords',
@@ -101,33 +101,38 @@ export default {
       label: 'Coordinates',
       value: match.source === 'DMS' ? decimal : toDms(match.lat, ['N', 'S']),
       detailTitle: 'Coordinates',
-      open: (api) => detailView(match, api)
+      detail: { kind: 'blocks', blocks: detailBlocks(match) }
     }];
   }
 };
 
-function detailView(match, api) {
-  const box = el('div', { class: 'hh-detail' });
+function detailBlocks(match) {
+  // A finer rounding than the menu row: this is the view you copy out of.
   const decimal = `${match.lat.toFixed(6)}, ${match.lon.toFixed(6)}`;
   const dms = `${toDms(match.lat, ['N', 'S'])} ${toDms(match.lon, ['E', 'W'])}`;
 
   const osm = `https://www.openstreetmap.org/?mlat=${match.lat}&mlon=${match.lon}#map=13/${match.lat}/${match.lon}`;
   const google = `https://www.google.com/maps/search/?api=1&query=${match.lat},${match.lon}`;
 
-  replaceContent(box,
-    el('div', { class: 'hh-headline' }, el('span', { text: decimal })),
-    el('p', { class: 'hh-sub', text: `read as ${match.source}` }),
-    el('div', { class: 'hh-facts' },
-      el('div', { class: 'hh-fact' },
-        el('em', { text: 'Decimal' }), el('span', { class: 'hh-mono', text: decimal })),
-      el('div', { class: 'hh-fact' },
-        el('em', { text: 'DMS' }), el('span', { class: 'hh-mono', text: dms }))
-    ),
-    el('div', { class: 'hh-row' },
-      btn('OpenStreetMap', () => openTab(osm), { icon: 'pin' }),
-      btn('Google Maps', () => openTab(google), { icon: 'pin' }),
-      copyButton(decimal, api)
-    )
-  );
-  return box;
+  return [
+    { type: 'headline', text: decimal },
+    { type: 'sub', text: `read as ${match.source}` },
+    {
+      type: 'facts',
+      items: [
+        { label: 'Decimal', value: decimal, mono: true },
+        { label: 'DMS', value: dms, mono: true }
+      ]
+    },
+    {
+      // `run` is a callback, not a node, so the buttons stay describable: a
+      // native renderer draws its own and calls back in to open the tab.
+      type: 'buttons',
+      items: [
+        { label: 'OpenStreetMap', icon: 'pin', run: () => openTab(osm) },
+        { label: 'Google Maps', icon: 'pin', run: () => openTab(google) },
+        { copy: decimal }
+      ]
+    }
+  ];
 }

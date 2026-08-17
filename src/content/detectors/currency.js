@@ -6,7 +6,6 @@
  * shows the rate, when it was published, and a couple of other currencies.
  */
 
-import { el, asyncView, replaceContent, note } from '../kit.js';
 import {
   CURRENCY_CODES,
   CURRENCY_SYMBOLS,
@@ -114,7 +113,7 @@ export default {
     };
   },
 
-  items({ match, api }) {
+  rows({ match }) {
     if (match.sameCurrency) {
       // Nothing to convert, but confirming what we read is still useful.
       return [{
@@ -125,59 +124,62 @@ export default {
       }];
     }
 
-    // The worker caches rates, so the row's lookup and the detail view's
-    // lookup cost one network request between them.
-    const inline = fetchRates(api, match.code).then((res) => {
-      const rate = res.rates[match.target];
-      if (!rate) throw new Error('no rate');
-      return amountLine(match.value * rate, match.target);
-    });
-
     return [{
       key: 'currency',
       icon: 'currency',
       label: `Convert to ${match.target}`,
-      value: inline,
+      // The worker caches rates, so the row's lookup and the detail view's
+      // lookup cost one network request between them.
+      value: { task: (api) => convertedLine(match, api) },
       detailTitle: `${match.code} → ${match.target}`,
-      open: (ctx) => detailView(match, ctx)
+      detail: {
+        kind: 'async',
+        loading: 'Fetching rates…',
+        run: (api) => detailBlocks(match, api)
+      }
     }];
   }
 };
 
-function detailView(match, api) {
-  return asyncView('Fetching rates…', async () => {
-    const res = await fetchRates(api, match.code);
-    const rate = res.rates[match.target];
+async function convertedLine(match, api) {
+  const res = await fetchRates(api, match.code);
+  const rate = res.rates[match.target];
+  if (!rate) throw new Error('no rate');
+  return amountLine(match.value * rate, match.target);
+}
 
-    if (!rate) {
-      return note(
-        `No published rate for ${match.target} against ${match.code}.`,
-        'hh-warn'
-      );
-    }
+async function detailBlocks(match, api) {
+  const res = await fetchRates(api, match.code);
+  const rate = res.rates[match.target];
 
-    const box = el('div', {});
-    const headline = el('div', { class: 'hh-headline' },
-      el('span', { class: 'hh-from', text: amountLine(match.value, match.code) }),
-      el('span', { class: 'hh-arrow', text: '→' }),
-      el('span', { text: amountLine(match.value * rate, match.target) })
-    );
+  if (!rate) {
+    return [{
+      type: 'note',
+      text: `No published rate for ${match.target} against ${match.code}.`,
+      variant: 'hh-warn'
+    }];
+  }
 
-    const when = new Date(res.updated);
-    const sub = el('p', { class: 'hh-sub' },
-      `1 ${match.code} = ${formatMoney(rate, match.target)} ${match.target} · ` +
-      (res.stale ? 'cached, offline' : `updated ${when.toLocaleDateString()}`)
-    );
+  const when = new Date(res.updated);
+  const facts = extraTargets(match.code, match.target)
+    .filter((code) => res.rates[code])
+    .map((code) => ({
+      label: currencyName(code),
+      value: amountLine(match.value * res.rates[code], code)
+    }));
 
-    const facts = extraTargets(match.code, match.target)
-      .filter((code) => res.rates[code])
-      .map((code) => el('div', { class: 'hh-fact' },
-        el('em', { text: currencyName(code) }),
-        el('span', { text: amountLine(match.value * res.rates[code], code) })
-      ));
-
-    replaceContent(box, headline, sub,
-      facts.length ? el('div', { class: 'hh-facts' }, ...facts) : null);
-    return box;
-  }, (err, retry) => api.errorFor(err, retry));
+  return [
+    {
+      type: 'headline',
+      from: amountLine(match.value, match.code),
+      op: '→',
+      text: amountLine(match.value * rate, match.target)
+    },
+    {
+      type: 'sub',
+      text: `1 ${match.code} = ${formatMoney(rate, match.target)} ${match.target} · ` +
+        (res.stale ? 'cached, offline' : `updated ${when.toLocaleDateString()}`)
+    },
+    ...(facts.length ? [{ type: 'facts', items: facts }] : [])
+  ];
 }

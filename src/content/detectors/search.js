@@ -14,7 +14,6 @@
  * catch-all and below everything specific.
  */
 
-import { el, menu, btn, note, replaceContent } from '../kit.js';
 import { resolveEngines, searchUrlFor } from '../../common/searchengines.js';
 import { looksLikeLanguage } from '../../common/text.js';
 
@@ -22,6 +21,10 @@ const MIN_CHARS = 2;
 /** Past this it is a passage, not a query, and every engine will truncate it. */
 const MAX_CHARS = 300;
 const PREVIEW_CHARS = 28;
+
+function openTab(url) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 
 export default {
   id: 'search',
@@ -43,7 +46,7 @@ export default {
     return engines.length ? { engines } : null;
   },
 
-  items({ text, match }) {
+  rows({ text, match }) {
     const query = text.trim().replace(/\s+/g, ' ');
 
     return [{
@@ -52,17 +55,19 @@ export default {
       label: 'Search with…',
       value: match.engines.length > 1 ? `${match.engines.length} sites` : match.engines[0].name,
       detailTitle: 'Search with',
-      open: (api) => menu(
-        match.engines.map((engine) => ({
+      // A nested menu, one row per engine — the same shape text tools uses, and
+      // what lets four search engines cost a single row at the top level.
+      detail: {
+        kind: 'menu',
+        rows: match.engines.map((engine) => ({
           key: `search:${engine.id}`,
           icon: 'search',
           label: engine.name,
           value: preview(query),
           detailTitle: engine.name,
-          open: () => openView(engine, query)
-        })),
-        api
-      )
+          detail: engineView(engine, query)
+        }))
+      }
     }];
   }
 };
@@ -80,22 +85,37 @@ function preview(q) {
  * which matters more here than elsewhere, because this is the one action that
  * hands your selection to someone else.
  */
-function openView(engine, query) {
-  const box = el('div', { class: 'hh-detail' });
+function engineView(engine, query) {
   const url = searchUrlFor(engine.url, query);
 
   if (!url) {
-    return replaceContent(box, note(`${engine.name} has no {q} in its URL, so there is nowhere to put the selection.`, 'hh-warn'));
+    return {
+      kind: 'blocks',
+      blocks: [{
+        type: 'note',
+        text: `${engine.name} has no {q} in its URL, so there is nowhere to put the selection.`,
+        variant: 'hh-warn'
+      }]
+    };
   }
 
-  return replaceContent(box,
-    el('div', { class: 'hh-label', text: engine.name }),
-    el('div', { class: 'hh-text', text: query }),
-    el('div', { class: 'hh-row' },
-      btn(`Open ${engine.name}`, () => {
-        window.open(url, '_blank', 'noopener,noreferrer');
-      }, { variant: 'hh-primary', icon: 'search' })
-    ),
-    note('This sends the selected text to that site.')
-  );
+  return {
+    kind: 'blocks',
+    blocks: [
+      { type: 'label', text: engine.name },
+      { type: 'text', text: query },
+      {
+        // A button described rather than built: `run` is a callback, so a native
+        // renderer draws its own and calls back in to open the tab.
+        type: 'buttons',
+        items: [{
+          label: `Open ${engine.name}`,
+          icon: 'search',
+          variant: 'hh-primary',
+          run: () => openTab(url)
+        }]
+      },
+      { type: 'note', text: 'This sends the selected text to that site.' }
+    ]
+  };
 }

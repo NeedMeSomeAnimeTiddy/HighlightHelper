@@ -17,7 +17,7 @@ import { getSettings, onSettingsChanged, isEnabledFor } from '../common/settings
 import { MSG, ERR, PROVIDER, PORT } from '../common/constants.js';
 import { TOOL_HINTS, toolFamily, detectorForTool } from '../common/tools.js';
 import { detect, getDetector } from './detectors/index.js';
-import { el, menu, glyph, errorBox, note } from './kit.js';
+import { el, menu, glyph, errorBox, note, openRow } from './kit.js';
 import { markGlyph } from './icons.js';
 import { runLocal, chatLocal, isSupported as localSupported } from './local-ai.js';
 import { restore as restoreHighlights, watch as watchHighlights } from './highlights.js';
@@ -727,16 +727,37 @@ function collectItems(api, forceIds = []) {
     if (match) hits.unshift({ detector, match, priority: -1 });
   }
 
+  /**
+   * Everything a row needs to know about *where* it is, as plain data.
+   *
+   * `rows()` deliberately has no `api` — it must not be able to build DOM or
+   * start a request. But a row still has to say "Translate to French" when the
+   * right-click asked for French, and a custom tool's prompt may template the
+   * page title. Those are facts, not capabilities, so they come in like this
+   * and the Android bridge supplies its own.
+   */
+  const context = {
+    forcedLanguage: api.forcedLanguage || null,
+    title: document.title,
+    host: location.hostname,
+    url: location.href
+  };
+
   const items = [];
   for (const hit of hits) {
     let produced;
     try {
-      produced = hit.detector.items({
-        text: current.text,
-        match: hit.match,
-        settings,
-        api
-      });
+      // `rows` describes the menu as data and is what the Android app consumes;
+      // `items` builds DOM and is the older form. A detector has one or the
+      // other, and this is the only place that has to know which.
+      produced = hit.detector.rows
+        ? hit.detector.rows({ text: current.text, match: hit.match, settings, context })
+        : hit.detector.items({
+            text: current.text,
+            match: hit.match,
+            settings,
+            api
+          });
     } catch (err) {
       console.warn(`[Highlight Helper] detector "${hit.detector.id}" failed:`, err);
       continue;
@@ -750,22 +771,24 @@ function collectItems(api, forceIds = []) {
  * Opens the row `key` names, descending one level into a submenu if needed.
  * Returns false when no such row exists for this selection.
  */
+const canOpen = (item) => Boolean(item?.open || item?.detail);
+
 function drillTo(key, items, api) {
   const exact = items.find((item) => item.key === key);
-  if (exact?.open) {
-    pushView(exact.detailTitle || exact.label, exact.open(api));
+  if (canOpen(exact)) {
+    pushView(exact.detailTitle || exact.label, openRow(exact, api));
     return true;
   }
 
   const parent = items.find((item) => key.startsWith(`${item.key}:`));
-  if (!parent?.open) return false;
+  if (!canOpen(parent)) return false;
 
-  const submenu = parent.open(api);
+  const submenu = openRow(parent, api);
   const child = submenu.hhItems?.find((item) => item.key === key);
-  if (!child?.open) return false;
+  if (!canOpen(child)) return false;
 
   pushView(parent.detailTitle || parent.label, submenu);
-  pushView(child.detailTitle || child.label, child.open(api));
+  pushView(child.detailTitle || child.label, openRow(child, api));
   return true;
 }
 

@@ -8,8 +8,7 @@
  * Costs a DeepSeek call, so nothing happens until the row is picked.
  */
 
-import { el, asyncView, copyButton, sourceButton, provenanceNote, followUp, textBlock }
-  from '../kit.js';
+import { el, copyButton, sourceButton, provenance, followUp } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { letterRatio } from '../../common/text.js';
 
@@ -30,6 +29,16 @@ function isAcronym(text) {
 
 function short(text) {
   return text.length > LABEL_CHARS ? `${text.slice(0, LABEL_CHARS - 1)}…` : text;
+}
+
+/**
+ * The line provenanceNote() draws, as data: "cached, on-device" with a capital,
+ * or nothing at all when the answer was neither. Said as its own line here
+ * because the explanation above it has no label to hang the suffix on.
+ */
+function provenanceLine(res) {
+  const text = provenance(res).replace(/^ · /, '');
+  return text ? text[0].toUpperCase() + text.slice(1) : '';
 }
 
 export default {
@@ -55,30 +64,63 @@ export default {
     return { term: t, acronym, priority: acronym ? 15 : 40 };
   },
 
-  items({ match }) {
+  rows({ match }) {
     return [{
       key: 'explain',
       icon: 'explain',
       label: match.acronym ? `Expand “${short(match.term)}”` : 'Explain this',
       detailTitle: short(match.term),
-      open: (ctx) => asyncView('Looking it up…', async () => {
-        const res = await ctx.ai(AI.EXPLAIN, match.term, {
-          pageContext: ctx.context.title
-        });
-        const actions = el('div', { class: 'hh-row' }, copyButton(res.text, ctx));
-        const view = el('div', {},
-          textBlock(res.text),
-          actions,
-          provenanceNote(res)
-        );
+      // One call and one answer, so the view waits behind a spinner rather than
+      // streaming: an explanation is a sentence or two, not a page.
+      detail: {
+        kind: 'async',
+        loading: 'Looking it up…',
+        run: (api) => explainBlocks(match.term, api)
+      }
+    }];
+  }
+};
+
+async function explainBlocks(term, api) {
+  const res = await api.ai(AI.EXPLAIN, term, { pageContext: api.context.title });
+  const source = provenanceLine(res);
+
+  return [
+    { type: 'text', text: res.text, rich: true },
+    {
+      /*
+       * Copy and "Find a source", kept together on one line and kept as DOM.
+       *
+       * Not laziness about the block vocabulary: the source button appends
+       * itself *into* the Copy row, so describing the two as separate blocks
+       * would put "Find a source" on a line of its own — a real layout change
+       * to a shipped view, for no gain. Android therefore loses the Copy button
+       * on this view too, which costs nothing today because the AI path is not
+       * wired up there at all yet.
+       */
+      type: 'custom',
+      note: '“Find a source” needs the browser panel.',
+      render: (api) => {
+        const actions = el('div', { class: 'hh-row' }, copyButton(res.text, api));
         // DeepSeek has no web access and cannot cite anything, so this is a
         // real encyclopedia lookup rather than a citation from the model. The
         // explanation goes along as context: it describes the sense meant, and
         // "SLA" alone finds the Symbionese Liberation Army first.
-        sourceButton(match.term, ctx, actions, { context: res.text });
-        followUp({ source: match.term, answer: res.text }, ctx, view);
-        return view;
-      }, (err, retry) => ctx.errorFor(err, retry))
-    }];
-  }
-};
+        sourceButton(term, api, actions, { context: res.text });
+        return actions;
+      }
+    },
+    ...(source ? [{ type: 'sub', text: source }] : []),
+    {
+      // The follow-up thread is a live conversation that owns its own state
+      // across turns, which is the other thing no block type describes.
+      type: 'custom',
+      note: 'Follow-up questions need the browser panel.',
+      render: (api) => {
+        const host = el('div', {});
+        followUp({ source: term, answer: res.text }, api, host);
+        return host;
+      }
+    }
+  ];
+}

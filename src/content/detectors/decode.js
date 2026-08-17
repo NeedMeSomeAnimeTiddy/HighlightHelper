@@ -10,8 +10,6 @@
  * valid base64.
  */
 
-import { el, replaceContent, resultView, actionRow, note } from '../kit.js';
-
 const MAX_LEN = 20000;
 
 const RE_JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/;
@@ -211,7 +209,7 @@ export default {
     return found || null;
   },
 
-  items({ match }) {
+  rows({ match }) {
     const [kind, label] = LABELS[match.kind];
     return [{
       key: 'decode',
@@ -219,37 +217,48 @@ export default {
       label,
       value: kind,
       detailTitle: kind,
-      open: (api) => (match.kind === 'jwt' ? jwtView(match, api) : textView(match, api))
+      // Everything is already decoded by `matches`, so the view is static
+      // content: no work left to do behind a spinner.
+      detail: {
+        kind: 'blocks',
+        blocks: match.kind === 'jwt' ? jwtBlocks(match) : textBlocks(match)
+      }
     }];
   }
 };
 
-function textView(match, api) {
-  return resultView(match.text, api, { label: LABELS[match.kind][0] });
+function textBlocks(match) {
+  return [
+    { type: 'label', text: LABELS[match.kind][0] },
+    { type: 'text', text: match.text },
+    { type: 'actions', text: match.text }
+  ];
 }
 
-function jwtView(match, api) {
-  const box = el('div', { class: 'hh-detail' });
-  const claims = Object.entries(match.payload).map(([key, value]) => {
-    const readable = TIME_CLAIMS.has(key) && typeof value === 'number'
+function jwtBlocks(match) {
+  const claims = Object.entries(match.payload).map(([key, value]) => ({
+    label: key,
+    value: TIME_CLAIMS.has(key) && typeof value === 'number'
       ? new Date(value * 1000).toLocaleString()
-      : typeof value === 'object' ? JSON.stringify(value) : String(value);
-    return el('div', { class: 'hh-fact' },
-      el('em', { text: key }),
-      el('span', { class: 'hh-mono', text: readable })
-    );
-  });
+      : typeof value === 'object' ? JSON.stringify(value) : String(value),
+    // Claim values are opaque identifiers and timestamps as often as they are
+    // words, so they line up better in a monospaced face.
+    mono: true
+  }));
 
   const expiry = typeof match.payload.exp === 'number'
     ? (match.payload.exp * 1000 < Date.now() ? 'Expired' : 'Not expired')
     : null;
 
-  replaceContent(box,
-    el('div', { class: 'hh-label', text: `Header · ${match.header.alg || 'unknown alg'}` }),
-    expiry ? note(expiry, expiry === 'Expired' ? 'hh-warn' : '') : null,
-    el('div', { class: 'hh-label', text: 'Payload' }),
-    el('div', { class: 'hh-facts' }, ...claims),
-    actionRow(JSON.stringify(match.payload, null, 2), api)
-  );
-  return box;
+  return [
+    { type: 'label', text: `Header · ${match.header.alg || 'unknown alg'}` },
+    // A token with no `exp` claim simply says nothing about expiry rather than
+    // claiming it never expires.
+    ...(expiry
+      ? [{ type: 'note', text: expiry, variant: expiry === 'Expired' ? 'hh-warn' : '' }]
+      : []),
+    { type: 'label', text: 'Payload' },
+    { type: 'facts', items: claims },
+    { type: 'actions', text: JSON.stringify(match.payload, null, 2) }
+  ];
 }

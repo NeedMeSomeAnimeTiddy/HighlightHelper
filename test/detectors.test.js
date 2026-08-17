@@ -214,8 +214,13 @@ check('every detector has a settings toggle',
 check('no orphaned toggles',
   Object.keys(DEFAULTS.detectors).every((id) => LIST.some((d) => d.id === id)), true);
 check('every detector implements the interface',
-  LIST.every((d) => typeof d.matches === 'function' && typeof d.items === 'function' &&
+  LIST.every((d) => typeof d.matches === 'function' &&
     typeof d.title === 'string' && typeof d.priority === 'number'), true);
+// Exactly one of the two — a detector carrying both would have two descriptions
+// of the same menu, and nothing would fail when they drifted apart.
+check('every detector builds its menu exactly one way',
+  LIST.every((d) => (typeof d.rows === 'function') !== (typeof d.items === 'function')),
+  true);
 check('detector ids are unique', new Set(LIST.map((d) => d.id)).size, LIST.length);
 check('a disabled detector is skipped',
   detect('$50', S({
@@ -323,7 +328,7 @@ check('text tools counts characters', tt.stats.characters, 21);
 check('text tools needs some content', texttools.matches('  ', S()), null);
 check('text tools ignores pure punctuation', texttools.matches('!!!', S()), null);
 
-const ttRows = texttools.items({ text: 'Hello brave new world', match: tt, settings: S(), api: {} });
+const ttRows = texttools.rows({ text: 'Hello brave new world', match: tt, settings: S() });
 check('text tools contributes one row', ttRows.length, 1);
 check('text tools row shows the count', ttRows[0].value, '4 words');
 
@@ -332,10 +337,17 @@ check('text tools row shows the count', ttRows[0].value, '4 words');
 const longText = 'The committee met on Tuesday to review the quarterly figures. '.repeat(6);
 check('summarise matches long prose', Boolean(summarize.matches(longText, S())), true);
 check('summarise ignores a short line', summarize.matches('A short line.', S()), null);
+const summarizeRows = summarize.rows({
+  text: longText, match: summarize.matches(longText, S()), settings: S()
+});
 check('summarise offers two rows',
-  summarize.items({ text: longText, match: summarize.matches(longText, S()), settings: S(), api: {} })
-    .map((r) => r.key),
+  summarizeRows.map((r) => r.key),
   ['summarize', 'keypoints']);
+// The streaming path, described rather than run: an answer that arrives a token
+// at a time is the one view kind a native renderer cannot fake, so the shape it
+// receives is worth pinning down.
+check('a summary streams', summarizeRows[0].detail.kind, 'stream');
+check('and it names what it is waiting for', summarizeRows[0].detail.loading, 'Summarising…');
 
 /* ---------- coordinates ---------- */
 
@@ -397,7 +409,7 @@ check('sql recognised',
 check('prose is not code', code.matches(
   'The quick brown fox jumped over the lazy dog and kept running for miles.', S()), null);
 check('code offers explain and comment',
-  code.items({ text: JS, match: code.matches(JS, S()), settings: S(), api: {} })
+  code.rows({ text: JS, match: code.matches(JS, S()), settings: S() })
     .map((r) => r.key), ['code', 'code:comment']);
 
 /* ---------- QR ---------- */
@@ -461,7 +473,11 @@ for (const sample of [
   check(`QR error-correction codewords valid (v${encoded.version})`, round.blocksValid, true);
 }
 
-const qrRow = qr.items({ text: 'https://example.com', match: qr.matches('https://example.com', S()), settings: S(), api: {} });
+const qrRow = qr.rows({
+  text: 'https://example.com',
+  match: qr.matches('https://example.com', S()),
+  settings: S()
+});
 check('QR labels a link', qrRow[0].label, 'QR code for this link');
 check('QR ranks a link above the catch-alls',
   qr.matches('https://example.com', S()).priority, 35);
@@ -508,9 +524,9 @@ check('rewrite needs at least five words',
 /* ---------- menu rows ---------- */
 
 /**
- * Enough of the panel's api object for items() to build rows. Nothing here
- * touches the DOM — open() is lazy, so the row descriptions can be inspected
- * outside a browser.
+ * Enough of the panel's api object for a row to do its work. Nothing here
+ * touches the DOM — both a row's value and its detail view are lazy, so the
+ * descriptions can be inspected outside a browser.
  */
 const fakeApi = {
   forcedLanguage: null,
@@ -522,23 +538,63 @@ const fakeApi = {
   })
 };
 
+/**
+ * `rows()` describes the menu as data; `items()` builds DOM. Detectors are
+ * being moved from the second to the first — see kit.js — so the suite accepts
+ * either and the assertions below cover whichever a detector now uses.
+ */
 const rows = (detector, text, settings = S()) => {
   const match = detector.matches(text, settings);
-  return match ? detector.items({ text, match, settings, api: fakeApi }) : [];
+  if (!match) return [];
+  return detector.rows
+    ? detector.rows({ text, match, settings })
+    : detector.items({ text, match, settings, api: fakeApi });
 };
+
+/** The row's right-hand value, whether it is a literal, a promise or a task. */
+const rowValue = (row) => (typeof row.value?.task === 'function'
+  ? row.value.task(fakeApi)
+  : row.value);
+
+const opens = (row) => Boolean(row?.open || row?.detail);
 
 const currencyRows = rows(currency, '$50', S({ targetCurrency: 'EUR' }));
 check('currency row label', currencyRows[0].label, 'Convert to EUR');
-check('currency row resolves its value', await currencyRows[0].value, '€46.10');
-check('currency row is clickable', typeof currencyRows[0].open, 'function');
+check('currency row resolves its value', await rowValue(currencyRows[0]), '€46.10');
+check('currency row is clickable', opens(currencyRows[0]), true);
+check('currency row describes its detail rather than building it',
+  currencyRows[0].detail.kind, 'async');
+
+// The description a native renderer receives, which is the whole point of the
+// rows() layer: no DOM nodes, just blocks it can draw however it likes.
+const currencyBlocks = await currencyRows[0].detail.run(fakeApi);
+check('currency detail leads with the conversion',
+  currencyBlocks[0].type, 'headline');
+check('currency detail headline reads left to right',
+  `${currencyBlocks[0].from} ${currencyBlocks[0].op} ${currencyBlocks[0].text}`,
+  '$50.00 → €46.10');
+check('currency detail carries no DOM nodes',
+  currencyBlocks.every((b) => typeof b.type === 'string'), true);
 
 const sameRows = rows(currency, '$50', S({ targetCurrency: 'USD' }));
-check('same-currency row is static', sameRows[0].open, undefined);
+check('same-currency row is static', opens(sameRows[0]), false);
 check('same-currency row still reports the amount', sameRows[0].value, '$50.00');
 
 const unitRows = rows(unit, '5 miles');
 check('unit row label names the target unit', unitRows[0].label, 'Convert to km');
 check('unit row carries the answer inline', unitRows[0].value, '8.05 km');
+
+// A "Rounded" fact that reads the same as the exact one is just the same row
+// twice. (4 + 5) / 2 is 4.5 either way, so only the long division earns it.
+const calcFacts = (text) => {
+  const blocks = rows(calc, text)[0].detail.blocks;
+  return blocks.find((b) => b.type === 'facts').items.map((f) => [f.label, f.value]);
+};
+check('a whole result is shown once', calcFacts('2 + 2'), [['Exact', '4']]);
+check('a result rounding cannot shorten is shown once',
+  calcFacts('(4 + 5) / 2'), [['Exact', '4.5']]);
+check('a long result is shown exact and rounded',
+  calcFacts('10 / 3'), [['Exact', '3.3333333333333335'], ['Rounded', '3.33']]);
 
 check('acronym row quotes the term', rows(jargon, 'SLA')[0].label, 'Expand “SLA”');
 check('phrase row is generic', rows(jargon, 'technical debt')[0].label, 'Explain this');
@@ -927,21 +983,19 @@ check('a tool matches ordinary prose',
 check('custom tools stay off a hex colour',
   custom.matches('#3f8ae0', S({ customTools: TOOLS })), null);
 
-const oneTool = custom.items({
+const oneTool = custom.rows({
   text: 'some ordinary prose here',
   match: { tools: TOOLS },
-  settings: S({ customTools: TOOLS }),
-  api: { context: { title: 'T', url: 'https://e.com' } }
+  settings: S({ customTools: TOOLS })
 });
 check('one tool is a row, not a submenu', [oneTool.length, oneTool[0].key, oneTool[0].label],
   [1, 'custom:t1', 'Explain simply']);
 
 const twoTools = [...TOOLS, { id: 't2', name: 'To Spanish', prompt: 'Translate to Spanish.' }];
-const grouped = custom.items({
+const grouped = custom.rows({
   text: 'some ordinary prose here',
   match: { tools: twoTools },
-  settings: S({ customTools: twoTools }),
-  api: { context: {} }
+  settings: S({ customTools: twoTools })
 });
 check('several tools collapse into one drill-in row',
   [grouped.length, grouped[0].key, grouped[0].value], [1, 'custom', '2']);

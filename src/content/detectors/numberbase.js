@@ -9,8 +9,6 @@
  * selection that contains a number.
  */
 
-import { el, replaceContent, copyButton } from '../kit.js';
-
 const MAX_LEN = 32;
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -84,7 +82,7 @@ export default {
     return found;
   },
 
-  items({ match }) {
+  rows({ match }) {
     const dec = match.value.toString(10);
     return [{
       key: 'numberbase',
@@ -95,35 +93,32 @@ export default {
         ? `0x${match.value.toString(16).toUpperCase()}`
         : Number(dec).toLocaleString(),
       detailTitle: 'Number base',
-      open: (api) => detailView(match, api)
+      // Four base conversions of a number already in hand — nothing to await.
+      detail: { kind: 'blocks', blocks: detailBlocks(match) }
     }];
   }
 };
 
-function detailView(match, api) {
-  const box = el('div', { class: 'hh-detail' });
+function detailBlocks(match) {
   const { value } = match;
 
   const facts = [
-    ['Decimal', Number(value).toLocaleString()],
-    ['Hex', `0x${value.toString(16).toUpperCase()}`],
-    ['Binary', groupBinary(value.toString(2))],
-    ['Octal', `0o${value.toString(8)}`]
+    { label: 'Decimal', value: Number(value).toLocaleString(), mono: true },
+    { label: 'Hex', value: `0x${value.toString(16).toUpperCase()}`, mono: true },
+    { label: 'Binary', value: groupBinary(value.toString(2)), mono: true },
+    { label: 'Octal', value: `0o${value.toString(8)}`, mono: true }
   ];
 
   const bytes = asBytes(value);
-  if (bytes) facts.push(['If bytes', bytes]);
+  if (bytes) facts.push({ label: 'If bytes', value: bytes, mono: true });
 
-  replaceContent(box,
-    el('div', { class: 'hh-headline' }, el('span', { text: Number(value).toLocaleString() })),
-    el('p', { class: 'hh-sub', text: `read as ${match.source}` }),
-    el('div', { class: 'hh-facts' },
-      ...facts.map(([label, text]) => el('div', { class: 'hh-fact' },
-        el('em', { text: label }),
-        el('span', { class: 'hh-mono', text })
-      ))
-    ),
-    el('div', { class: 'hh-row' }, copyButton(value.toString(10), api))
-  );
-  return box;
+  return [
+    { type: 'headline', text: Number(value).toLocaleString() },
+    { type: 'sub', text: `read as ${match.source}` },
+    { type: 'facts', items: facts },
+    {
+      type: 'buttons',
+      items: [{ copy: value.toString(10) }]
+    }
+  ];
 }

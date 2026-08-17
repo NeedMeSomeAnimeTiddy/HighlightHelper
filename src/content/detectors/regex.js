@@ -10,8 +10,6 @@
  * catastrophic backtracking into the content script.
  */
 
-import { el, replaceContent, note } from '../kit.js';
-
 const MAX_LEN = 400;
 
 const RE_DELIMITED = /^\/((?:[^/\\\n]|\\.)+)\/([dgimsuvy]*)$/;
@@ -266,43 +264,50 @@ export default {
     return { ...parsed, steps };
   },
 
-  items({ match }) {
+  rows({ match }) {
     return [{
       key: 'regex',
       icon: 'regex',
       label: 'Explain this regex',
       value: `${match.steps.length} parts`,
       detailTitle: 'Regex',
-      open: () => detailView(match)
+      // `matches` has already walked the pattern, so the view is static content:
+      // there is no work left to do behind a spinner.
+      detail: { kind: 'blocks', blocks: detailBlocks(match) }
     }];
   }
 };
 
-function detailView(match) {
-  const box = el('div', { class: 'hh-detail' });
+/**
+ * The breakdown, then the flags.
+ *
+ * A step is a token and what that token does, which is exactly the label/value
+ * pair `facts` exists for — so the walkthrough describes itself rather than
+ * being drawn. Source order carries the structure; the group-depth indentation
+ * the panel used to draw has no equivalent in the block vocabulary and is the
+ * one thing that does not survive the move.
+ */
+function detailBlocks(match) {
+  const flags = [...match.flags]
+    .filter((f) => FLAGS[f])
+    // The flag letter is the code and the description is the prose, so the
+    // monospace belongs on the label here rather than on the value.
+    .map((f) => ({ label: f, value: FLAGS[f], monoLabel: true }));
 
-  const rows = match.steps.map((step) => el('div', {
-    class: 'hh-step',
-    style: `padding-left:${step.depth * 11}px`
-  },
-    el('code', { class: 'hh-mono hh-step-token', text: step.token }),
-    el('span', { class: 'hh-step-text', text: step.description })
-  ));
-
-  const flagRows = [...match.flags].filter((f) => FLAGS[f]).map((f) =>
-    el('div', { class: 'hh-fact' },
-      el('em', { class: 'hh-mono', text: f }),
-      el('span', { text: FLAGS[f] })
-    )
-  );
-
-  replaceContent(box,
-    el('div', { class: 'hh-steps' }, ...rows),
-    flagRows.length
-      ? el('div', { class: 'hh-facts' },
-          el('div', { class: 'hh-label', text: 'Flags' }), ...flagRows)
-      : null,
-    match.delimited ? null : note('Read as a bare pattern, with no flags.')
-  );
-  return box;
+  return [
+    {
+      // Indented, because nesting depth is part of what the pattern means:
+      // `(a(b))` and `(a)(b)` have the same tokens and are not the same regex.
+      type: 'steps',
+      items: match.steps
+    },
+    ...(flags.length
+      ? [{ type: 'facts', label: 'Flags', items: flags }]
+      : []),
+    // With no /…/ around it there was nowhere for a flag to be written, so the
+    // reading is stated rather than left for the reader to wonder about.
+    ...(match.delimited
+      ? []
+      : [{ type: 'note', text: 'Read as a bare pattern, with no flags.' }])
+  ];
 }

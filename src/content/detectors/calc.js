@@ -10,7 +10,6 @@
  * execution primitive, and no amount of pre-filtering makes that safe.
  */
 
-import { el, replaceContent, copyButton } from '../kit.js';
 import { formatNumber } from '../../common/numbers.js';
 
 const MAX_LEN = 120;
@@ -166,41 +165,38 @@ export default {
     return result || null;
   },
 
-  items({ match }) {
+  rows({ match }) {
     return [{
       key: 'calc',
       icon: 'calc',
       label: 'Result',
       value: formatNumber(match.value),
       detailTitle: 'Calculation',
-      open: (api) => detailView(match, api)
+      // Everything here is already in hand, so the view is plain static blocks.
+      detail: { kind: 'blocks', blocks: detailBlocks(match) }
     }];
   }
 };
 
-function detailView(match, api) {
-  const box = el('div', { class: 'hh-detail' });
+function detailBlocks(match) {
   const exact = String(match.value);
   const rounded = formatNumber(match.value);
 
-  const facts = [['Exact', exact]];
-  if (Number.isInteger(match.value) === false) {
-    facts.push(['Rounded', formatNumber(match.value, { maxDecimals: 2 })]);
+  // The unrounded value is what you copy; the two-decimal one is what you read.
+  // For 4.5 the two are the same string, so the second row would only repeat
+  // the first — show it when rounding actually changed something.
+  const short = formatNumber(match.value, { maxDecimals: 2 });
+  const facts = [{ label: 'Exact', value: exact, mono: true }];
+  if (short !== exact) {
+    facts.push({ label: 'Rounded', value: short, mono: true });
   }
 
-  replaceContent(box,
-    el('div', { class: 'hh-headline' },
-      el('span', { class: 'hh-from', text: match.reading }),
-      el('span', { class: 'hh-arrow', text: '=' }),
-      el('span', { text: rounded })
-    ),
-    el('div', { class: 'hh-facts' },
-      ...facts.map(([label, value]) => el('div', { class: 'hh-fact' },
-        el('em', { text: label }),
-        el('span', { class: 'hh-mono', text: value })
-      ))
-    ),
-    el('div', { class: 'hh-row' }, copyButton(exact, api))
-  );
-  return box;
+  return [
+    { type: 'headline', from: match.reading, op: '=', text: rounded },
+    { type: 'facts', items: facts },
+    {
+      type: 'buttons',
+      items: [{ copy: exact }]
+    }
+  ];
 }

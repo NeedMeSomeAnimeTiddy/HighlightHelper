@@ -8,8 +8,6 @@
  * are ordinary words far more often than they are colours.
  */
 
-import { el, replaceContent, copyButton } from '../kit.js';
-
 const MAX_LEN = 60;
 
 const RE_HEX = /^#?([0-9a-f]{3,8})$/i;
@@ -131,55 +129,46 @@ export default {
     return found || null;
   },
 
-  items({ match }) {
+  rows({ match }) {
     return [{
       key: 'color',
       icon: 'color',
       label: 'Colour',
       value: toHex(match.rgb, match.alpha),
       detailTitle: 'Colour',
-      open: (api) => detailView(match, api)
+      // Nothing to fetch or compute later — the whole view is known already.
+      detail: { kind: 'blocks', blocks: detailBlocks(match) }
     }];
   }
 };
 
-function detailView(match, api) {
-  const box = el('div', { class: 'hh-detail' });
+function detailBlocks(match) {
   const hex = toHex(match.rgb, match.alpha);
+  // The swatch is painted with the rgb() form because it is the one notation
+  // every renderer understands, alpha included.
   const css = toRgbString(match.rgb, match.alpha);
-
-  const swatch = el('div', { class: 'hh-swatch' });
-  swatch.style.setProperty('--swatch', css);
 
   const lum = luminance(match.rgb);
   const onWhite = contrast(lum, 1).toFixed(2);
   const onBlack = contrast(lum, 0).toFixed(2);
 
-  const rows = [
-    ['Hex', hex],
-    ['RGB', toRgbString(match.rgb, match.alpha)],
-    ['HSL', toHslString(match.rgb, match.alpha)]
+  return [
+    { type: 'swatch', css, title: hex, sub: `read as ${match.source}` },
+    {
+      type: 'facts',
+      items: [
+        { label: 'Hex', value: hex, mono: true },
+        { label: 'RGB', value: toRgbString(match.rgb, match.alpha), mono: true },
+        { label: 'HSL', value: toHslString(match.rgb, match.alpha), mono: true },
+        {
+          label: 'Contrast',
+          value: `${onWhite}:1 on white · ${onBlack}:1 on black`
+        }
+      ]
+    },
+    {
+      type: 'buttons',
+      items: [{ copy: hex }]
+    }
   ];
-
-  replaceContent(box,
-    el('div', { class: 'hh-swatch-row' },
-      swatch,
-      el('div', {},
-        el('div', { class: 'hh-headline', text: hex }),
-        el('p', { class: 'hh-sub', text: `read as ${match.source}` })
-      )
-    ),
-    el('div', { class: 'hh-facts' },
-      ...rows.map(([label, value]) => el('div', { class: 'hh-fact' },
-        el('em', { text: label }),
-        el('span', { class: 'hh-mono', text: value })
-      )),
-      el('div', { class: 'hh-fact' },
-        el('em', { text: 'Contrast' }),
-        el('span', { text: `${onWhite}:1 on white · ${onBlack}:1 on black` })
-      )
-    ),
-    el('div', { class: 'hh-row' }, copyButton(hex, api))
-  );
-  return box;
 }

@@ -16,7 +16,6 @@
  * free, and the real work happens on the click.
  */
 
-import { el, btn, note, copyButton, replaceContent, spinner } from '../kit.js';
 import { linkToSelection } from '../anchor.js';
 import { ordinalOfSelection } from '../locate.js';
 import { looksLikeLanguage } from '../../common/text.js';
@@ -24,6 +23,10 @@ import { looksLikeLanguage } from '../../common/text.js';
 const MIN_CHARS = 3;
 /** Longer than this and the fragment is a paragraph; anchor.js refuses anyway. */
 const MAX_CHARS = 600;
+
+function openTab(url) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 
 export default {
   id: 'link',
@@ -50,64 +53,75 @@ export default {
     return { host: location.hostname };
   },
 
-  items({ text }) {
+  rows({ text }) {
     return [{
       key: 'link',
       icon: 'link',
       label: 'Link to this text',
       detailTitle: 'Link to this text',
-      open: (api) => linkView(text, api)
+      // Spinner first, then the answer: an async view, because working out
+      // whether the text can be pinned down means walking the whole document.
+      detail: {
+        kind: 'async',
+        loading: 'Finding this text on the page…',
+        /*
+         * The turn of the event loop is load-bearing, not ceremony.
+         *
+         * Walking the document is expensive, and the work happens once, here,
+         * after the click — never in matches(). Yielding first is what lets the
+         * spinner actually reach the screen before the walk blocks the thread;
+         * resolving on a microtask would paint the finished view and nothing else.
+         */
+        run: () => new Promise((resolve) => {
+          setTimeout(() => resolve(linkBlocks(text)), 0);
+        })
+      }
     }];
   }
 };
 
-function linkView(text, api) {
-  const box = el('div', { class: 'hh-detail' });
-  replaceContent(box, spinner('Finding this text on the page…'));
+function linkBlocks(text) {
+  let url = null;
+  try {
+    /*
+     * Which occurrence of the text was selected.
+     *
+     * Without it the link anchors to the first one on the page — fine for a
+     * unique sentence, and quietly wrong for a repeated phrase: selecting the
+     * fourth "however" produced a valid link to the first.
+     *
+     * An ordinal rather than a position, because the two files measure text
+     * differently — anchor.js collapses whitespace, locate.js removes it —
+     * and "which one" survives that where "how far in" would not.
+     */
+    const selection = window.getSelection();
+    const ordinal = selection?.rangeCount
+      ? ordinalOfSelection(text, selection.getRangeAt(0))
+      : 0;
 
-  // Walking the document is expensive, so it happens once, here, after the
-  // click — never in matches().
-  setTimeout(() => {
-    let url = null;
-    try {
-      /*
-       * Which occurrence of the text was selected.
-       *
-       * Without it the link anchors to the first one on the page — fine for a
-       * unique sentence, and quietly wrong for a repeated phrase: selecting the
-       * fourth "however" produced a valid link to the first.
-       *
-       * An ordinal rather than a position, because the two files measure text
-       * differently — anchor.js collapses whitespace, locate.js removes it —
-       * and "which one" survives that where "how far in" would not.
-       */
-      const selection = window.getSelection();
-      const ordinal = selection?.rangeCount
-        ? ordinalOfSelection(text, selection.getRangeAt(0))
-        : 0;
+    url = linkToSelection(text, { ordinal });
+  } catch (err) {
+    console.warn('[Highlight Helper] could not build a text fragment:', err);
+  }
 
-      url = linkToSelection(text, { ordinal });
-    } catch (err) {
-      console.warn('[Highlight Helper] could not build a text fragment:', err);
-    }
-
-    replaceContent(box, url ? found(url, api) : notFound(api));
-    api.resize?.();
-  }, 0);
-
-  return box;
+  return url ? found(url) : notFound();
 }
 
-function found(url, api) {
-  return el('div', {},
-    el('div', { class: 'hh-label', text: 'Link' }),
-    el('div', { class: 'hh-text', text: url }),
-    el('div', { class: 'hh-row' },
-      copyButton(url, api),
-      btn('Open it', () => window.open(url, '_blank', 'noopener,noreferrer'), { icon: 'link' })
-    ),
-    note('Opens the page scrolled to this text, with it highlighted. Works in Chrome, Edge and Safari.')
-  );
+function found(url) {
+  return [
+    { type: 'label', text: 'Link' },
+    { type: 'text', text: url },
+    {
+      // `copy` is named rather than left as another callback so the button can
+      // confirm on itself, and so a native renderer gets a real copy affordance.
+      type: 'buttons',
+      items: [
+        { copy: url },
+        { label: 'Open it', icon: 'link', run: () => openTab(url) }
+      ]
+    },
+    { type: 'note', text: 'Opens the page scrolled to this text, with it highlighted. Works in Chrome, Edge and Safari.' }
+  ];
 }
 
 /**
@@ -117,11 +131,11 @@ function found(url, api) {
  * is worse than not offering one — so when the text cannot be pinned down
  * uniquely, say so and offer the plain page link instead of guessing.
  */
-function notFound(api) {
+function notFound() {
   const plain = location.href.split('#')[0];
-  return el('div', {},
-    note("This text appears in too many places on the page to link to precisely — a link would land on the wrong one."),
-    el('div', { class: 'hh-row' }, copyButton(plain, api)),
-    note('That copies the plain page link instead.')
-  );
+  return [
+    { type: 'note', text: "This text appears in too many places on the page to link to precisely — a link would land on the wrong one." },
+    { type: 'buttons', items: [{ copy: plain }] },
+    { type: 'note', text: 'That copies the plain page link instead.' }
+  ];
 }
