@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Highlight Helper engine</title>
+
+<!--
+  The engine's host page. Never shown: the WebView holding it is not attached to
+  any layout, and nothing here draws.
+
+  It exists because ES modules need an origin. `import './src/...'` cannot
+  resolve from a `file://` URL, so WebViewAssetLoader serves this directory over
+  a real https:// host and the extension's own import graph then works exactly
+  as it does in Chrome — which is the point of the whole arrangement, and the
+  reason there is no bundler in this project.
+-->
+
+<script>
+  /*
+   * A module that throws while importing never reaches its own error handling,
+   * and the failure would otherwise be a WebView console line nobody reads and
+   * a Kotlin coroutine waiting for a `ready()` that is never coming.
+   */
+  window.addEventListener('error', (e) => {
+    try {
+      AndroidHost.failed(String(e.message || e.error || 'unknown error'));
+    } catch { /* the host is gone; nothing left to tell */ }
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    try {
+      AndroidHost.failed(String(e.reason?.message || e.reason || 'unhandled rejection'));
+    } catch { /* as above */ }
+  });
+</script>
+
+<script type="module" src="./bridge.js"></script>

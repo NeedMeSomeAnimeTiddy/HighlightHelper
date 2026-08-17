@@ -40,7 +40,7 @@ export default {
     return { existing: painter.findByText(t) };
   },
 
-  items({ text, match }) {
+  rows({ text, match }) {
     const existing = match.existing;
     return [{
       key: 'highlight',
@@ -48,13 +48,40 @@ export default {
       label: existing ? 'Highlighted' : 'Highlight this',
       value: existing ? COLORS.find((c) => c.id === existing.color)?.name : null,
       detailTitle: 'Highlight',
-      open: (api) => highlightView(text, existing, api)
+      detail: {
+        kind: 'blocks',
+        blocks: [{
+          /*
+           * The view that is the page, rather than a description of an answer.
+           *
+           * Picking a colour paints the live document through the CSS Custom
+           * Highlight API and saves a record in the same gesture; the swatch
+           * row shows which colour is on right now, the note field writes back
+           * as you leave it, and the whole thing redraws after every one of
+           * those. None of that is a block: `buttons` has no notion of a
+           * selected state, there is no text-input block, and blocks are handed
+           * over once rather than re-rendered.
+           *
+           * Nor should it be. A native renderer that highlights text is
+           * highlighting its own document with its own painter, and what it
+           * needs from here is the record — which lives in highlights-store.js,
+           * shared already — not a description of this panel's controls.
+           */
+          type: 'custom',
+          note: 'Highlighting paints the page itself, so it needs the browser panel.',
+          render: (api) => highlightView(text, existing, api)
+        }]
+      }
     }];
   }
 };
 
+/**
+ * The container is plain: the panel's own `hh-detail` wrapper is around this
+ * block already, and a second one would pad the view twice.
+ */
 function highlightView(text, existing, api) {
-  const box = el('div', { class: 'hh-detail' });
+  const box = el('div', {});
   let record = existing;
 
   const render = () => {

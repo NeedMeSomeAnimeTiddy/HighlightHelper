@@ -9,7 +9,7 @@
  * language picker sits next to Copy/Replace for switching afterwards.
  */
 
-import { el, replaceContent, spinner, actionRow, provenance, textBlock } from '../kit.js';
+import { el, blocks, replaceContent, spinner, actionRow, provenance } from '../kit.js';
 import { LANGUAGES, languageName } from '../../common/languages.js';
 import { detectLanguage, baseTag } from './langdetect.js';
 import { AI } from '../../common/constants.js';
@@ -48,55 +48,84 @@ export default {
     };
   },
 
-  items({ text, match, settings, api }) {
-    const initial = api.forcedLanguage || settings.language;
+  rows({ text, match, settings, context = {} }) {
+    // A right-click "Translate to French" names the target before the row is
+    // even built, so the label and the spinner both say French. This used to
+    // be readable only from `api` inside the view, which meant the menu row
+    // behind an opened translation claimed the wrong language.
+    const target = context.forcedLanguage || settings.language;
 
     return [{
       key: 'translate',
       icon: 'translate',
-      label: `Translate to ${languageName(initial)}`,
+      label: `Translate to ${languageName(target)}`,
       detailTitle: match.foreign && match.detected
         ? `From ${languageName(match.detected)}`
         : 'Translation',
-      open: (ctx) => view(text, initial, ctx)
+      detail: {
+        kind: 'async',
+        loading: `Translating into ${languageName(target)}…`,
+        run: (api) => translated(text, target, api)
+      }
     }];
   }
 };
 
-function view(text, initialLanguage, api) {
-  const box = el('div', { class: 'hh-detail' });
-  let target = initialLanguage;
+/** One translation, described: which language it is, the text, then the row. */
+async function translated(text, target, api) {
+  const res = await api.ai(AI.TRANSLATE, text, { language: target });
 
-  const picker = el('select', {
-    class: 'hh-select',
-    'aria-label': 'Translate into'
-  }, ...LANGUAGES.map(([code, name]) =>
-    el('option', { value: code, selected: code === target }, name)
-  ));
+  return [
+    { type: 'label', text: `${languageName(target)}${provenance(res)}` },
+    { type: 'text', text: res.text, rich: true },
+    {
+      /*
+       * Copy/Replace with the language picker on the end of the row, kept as
+       * DOM because the picker is the one genuinely live control here: it holds
+       * the current target and re-runs the whole translation when it changes.
+       *
+       * It also belongs *inside* the actions row rather than on a line of its
+       * own, which is the other reason an `actions` block plus something else
+       * cannot express it — `extra` takes buttons, and this is a <select>.
+       */
+      type: 'custom',
+      note: 'Switching language needs the browser panel.',
+      render: (api) => {
+        const picker = el('select', {
+          class: 'hh-select',
+          'aria-label': 'Translate into'
+        }, ...LANGUAGES.map(([code, name]) =>
+          el('option', { value: code, selected: code === target }, name)
+        ));
 
-  picker.addEventListener('change', () => {
-    target = picker.value;
-    run();
-  });
+        picker.addEventListener('change', () => retranslate(text, picker.value, api, picker));
 
-  function run() {
+        return actionRow(res.text, api, [picker]);
+      }
+    }
+  ];
+}
+
+/**
+ * Switching language, in place.
+ *
+ * The picker replaces the whole detail view — spinner, then the new answer —
+ * exactly as picking the row did the first time, so the blocks are rendered
+ * through the same `blocks()` the async view used rather than rebuilt by hand.
+ * `from` is any node inside that view; the container is the panel's, not ours,
+ * so it is found rather than held.
+ */
+function retranslate(text, target, api, from) {
+  const box = from.closest('.hh-detail');
+  if (!box) return;
+
+  const run = () => {
     replaceContent(box, spinner(`Translating into ${languageName(target)}…`));
-    api.ai(AI.TRANSLATE, text, { language: target }).then(
-      (res) => {
-        picker.value = target;
-        replaceContent(box,
-          el('div', {
-            class: 'hh-label',
-            text: `${languageName(target)}${provenance(res)}`
-          }),
-          textBlock(res.text),
-          actionRow(res.text, api, [picker])
-        );
-      },
+    translated(text, target, api).then(
+      (out) => replaceContent(box, el('div', {}, ...blocks(out, api))),
       (err) => replaceContent(box, api.errorFor(err, run))
     );
-  }
+  };
 
   run();
-  return box;
 }

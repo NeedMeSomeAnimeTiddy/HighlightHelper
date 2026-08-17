@@ -16,23 +16,59 @@
  * translate detector uses this to rank itself higher when it is confident the
  * text is foreign).
  *
- * `items` receives { text, match, settings, api } and returns menu rows:
+ * `rows` receives { text, match, settings, context } and returns menu rows.
+ *
+ * `context` is the page, as plain data — { forcedLanguage, title, host, url }.
+ * Facts, never capabilities: a row may need to say "Translate to French"
+ * because the right-click asked for French, but it must not be able to build
+ * DOM or start a request. The Android bridge supplies its own, mostly empty,
+ * because an intent carries a string and no page.
+ *
+ * The rows themselves:
  *
  *   {
  *     key,                  // unique; lets the panel open a row directly
  *     icon,                 // glyph name from ../icons.js
  *     label,                // row text
- *     value,                // optional right-hand result: string | Promise
+ *     value,                // right-hand result: string | { task(api) }
  *     detailTitle,          // header of the drilled-in view
- *     open(api) -> Node     // omit entirely for a static, unclickable row
+ *     detail                // a view spec; omit for a static, unclickable row
  *   }
  *
- * `value` may be a Promise when the answer is free but not instant (currency
- * waits on cached rates); the row shows a pulse until it resolves. Anything
- * that costs money must wait for `open` — that click is the user's consent.
+ * `value` as `{ task(api) }` is for an answer that is free but not instant
+ * (currency waits on cached rates); the row pulses until it resolves. Anything
+ * that costs money must wait for `detail` — that click is the user's consent.
  *
- * `open` returns an element synchronously. Use kit.asyncView for the
- * spinner-then-result-or-retry shape, and kit.menu to nest a submenu.
+ * A `detail` spec is one of four kinds, all rendered by kit.renderView:
+ *
+ *   { kind: 'blocks', blocks }                     static content
+ *   { kind: 'menu',   rows }                       a nested submenu
+ *   { kind: 'async',  loading, run(api) }          spinner, then blocks
+ *   { kind: 'stream', loading, run(api, emit), done(res, api) }
+ *
+ * and the block types are listed in kit.js: label, note, sub, quote, headline,
+ * facts, steps, text, code, swatch, actions, buttons, menu, and `custom` as the
+ * escape hatch for the few genuinely browser-shaped views.
+ *
+ * Reach for `custom` only when a view is genuinely a live widget — one that
+ * runs on open, redraws itself, or owns state across turns. Using it to avoid
+ * describing something that blocks could express costs the Android app a panel
+ * for nothing.
+ *
+ * ---
+ *
+ * Why data and not DOM.
+ *
+ * `rows` describes the menu; it does not build it. That is what lets the same
+ * detector drive the extension's panel and the Android app's native sheet
+ * without either owning the other's widgets — see ANDROID.md. The rule that
+ * makes it work is simple: nothing a detector returns may be a DOM node. Build
+ * nothing, describe everything, and let the renderer decide what a "headline"
+ * looks like on its platform.
+ *
+ * `items({ text, match, settings, api }) -> rows with open(api) -> Node` is the
+ * older form and still runs. Detectors are being moved across one at a time; a
+ * detector has one or the other, never both, and the test suite enforces it.
  *
  * Adding a detector = write the file, import it, add it to LIST, and add its
  * id to DEFAULTS.detectors in src/common/settings.js.

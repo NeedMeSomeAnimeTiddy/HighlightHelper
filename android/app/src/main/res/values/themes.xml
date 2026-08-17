@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.HighlightHelper" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+      The sheet is the whole UI, so the activity behind it must not be a screen.
+      A PROCESS_TEXT activity opens over whatever app the user was reading, and
+      an opaque window would look like leaving that app rather than acting on a
+      selection inside it.
+    -->
+    <style name="Theme.HighlightHelper.Transparent" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+
+</resources>

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Highlight Helper — every view, rendered</title>
+  <style>
+    body { font: 15px/1.6 system-ui, sans-serif; max-width: 78rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { margin-bottom: .2rem; }
+    .lede { color: #555; max-width: 46rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.4rem; margin-top: 2rem; }
+    .card > h3 { margin: 0 0 .4rem; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #666; }
+    .card > .what { margin: 0 0 .5rem; font: 12px/1.4 ui-monospace, monospace; color: #999; word-break: break-all; }
+    .broke { color: #c0392b; font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+    #summary { margin-top: 1rem; font-weight: 600; }
+    .dark { background: #16181d; color: #e6e6e6; padding: 1rem; border-radius: 8px; }
+    .dark .card > h3, .dark .card > .what { color: #9aa0aa; }
+    label { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Every view, rendered</h1>
+  <p class="lede">
+    The half of the extension the Node suite cannot reach. <code>rows()</code> is asserted
+    in <code>test/detectors.test.js</code>; this page renders what those descriptions
+    actually turn into, through the real <code>panel.css</code> in a real shadow root —
+    so a class that stopped matching shows up as something you can see.
+    <strong>Serve it over http</strong> (<code>node tools/static-server.js</code>), because
+    ES modules need an origin.
+  </p>
+
+  <p>
+    <span id="summary"></span>
+  </p>
+  <p class="lede">
+    For dark mode, switch the <em>browser or OS</em> to it and reload. The panel follows
+    <code>prefers-color-scheme</code>, so a control on this page could only restyle the page
+    around it and would tell you nothing about the thing being tested.
+  </p>
+
+  <div id="grid" class="grid"></div>
+
+  <script type="module">
+    import { LIST } from '../src/content/detectors/index.js';
+    import { menu, openRow, errorBox } from '../src/content/kit.js';
+    import { DEFAULTS } from '../src/common/settings.js';
+
+    /* ------------------------------------------------------------------ *
+     * Stubs
+     *
+     * Only what a view actually reaches for. Everything returns instantly and
+     * deterministically: this page is for looking at layout, so a view that
+     * depends on the network must still render the same way twice.
+     * ------------------------------------------------------------------ */
+
+    globalThis.chrome ??= {
+      runtime: { getURL: (p) => `../${p}`, sendMessage: async () => ({ ok: true }) },
+      storage: {
+        local: { get: async () => ({}), set: async () => {}, remove: async () => {} },
+        sync: { get: async () => ({}), set: async () => {} },
+        onChanged: { addListener() {} }
+      }
+    };
+
+    const LOREM =
+      'The committee reviewed the quarterly figures and found them broadly consistent ' +
+      'with the forecast, though the margin on hardware slipped by two points.';
+
+    const cannedSend = async (msg) => {
+      switch (msg.type) {
+        case 'hh:rates':
+          return { ok: true, base: msg.base, stale: false,
+                   updated: Date.parse('2026-08-12T00:00:00Z'),
+                   rates: { USD: 1, EUR: 0.922, GBP: 0.79, JPY: 157.2, CAD: 1.37 } };
+        case 'hh:define':
+          return { ok: true, cached: true, links: [{ label: 'Wiktionary', url: '#' }],
+                   entries: [{ partOfSpeech: 'noun', senses: [
+                     { text: 'The occurrence of events by chance in a happy way.',
+                       example: 'a fortunate stroke of serendipity' }] }] };
+        case 'hh:synonyms':
+          return { ok: true, words: ['luck', 'fortune', 'chance'], cached: true };
+        case 'hh:source':
+          return { ok: true, cached: true, links: [{ label: 'Search', url: '#' }],
+                   articles: [{ title: 'Service-level agreement', lang: 'en',
+                                description: 'A commitment between a provider and a client',
+                                extract: 'A service-level agreement is a commitment between a service provider and a customer.',
+                                url: '#' }] };
+        default:
+          return { ok: true };
+      }
+    };
+
+    function fakeApi(card) {
+      const api = {
+        settings: SETTINGS,
+        context: { title: 'A page', host: 'example.com', url: 'https://example.com/a' },
+        canReplace: true,
+        forcedLanguage: null,
+        send: cannedSend,
+        async ai(action, text, options = {}, onChunk = null) {
+          const out = `A stubbed ${action} answer, with **bold** and \`code\` so the ` +
+                      'markdown reader is exercised too.';
+          if (onChunk) onChunk(out);
+          return { ok: true, text: out, cached: false, local: true };
+        },
+        async chat(messages, onChunk = null) {
+          const out = 'A stubbed follow-up reply.';
+          if (onChunk) onChunk(out);
+          return { ok: true, text: out };
+        },
+        copy: async () => true,
+        replace: () => true,
+        openOptions: () => {},
+        resize: () => {},
+        errorFor: (err, retry) => errorBox(String(err?.message || err), { onRetry: retry }),
+        close: () => {},
+        pop: () => {},
+        // A drill-in on this page appends rather than replacing, so the whole
+        // stack stays visible at once — that is the point of the page.
+        push: (title, node) => card.append(labelled(title, node))
+      };
+      return api;
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Rendering
+     * ------------------------------------------------------------------ */
+
+    const SETTINGS = {
+      ...DEFAULTS,
+      targetCurrency: 'EUR',
+      customTools: [{ id: 't1', name: 'Explain simply', prompt: 'Explain simply: {{text}}' }]
+    };
+
+    const cssText = await (await fetch('../src/content/panel.css')).text();
+
+    let rendered = 0;
+    const failures = [];
+
+    function labelled(title, node) {
+      const wrap = document.createElement('div');
+      wrap.className = 'hh-panel';
+      const head = document.createElement('div');
+      head.className = 'hh-head';
+      const t = document.createElement('span');
+      t.className = 'hh-title';
+      t.textContent = title;
+      head.append(t);
+      const views = document.createElement('div');
+      views.className = 'hh-views';
+      const view = document.createElement('div');
+      view.className = 'hh-view';
+      view.append(node);
+      views.append(view);
+      wrap.append(head, views);
+      return wrap;
+    }
+
+    /** One card: a shadow root with the real stylesheet and the real widgets. */
+    function card(heading, what) {
+      const host = document.createElement('div');
+      host.className = 'card';
+
+      const h = document.createElement('h3');
+      h.textContent = heading;
+      const w = document.createElement('p');
+      w.className = 'what';
+      w.textContent = what;
+
+      const shadowHost = document.createElement('div');
+      const shadow = shadowHost.attachShadow({ mode: 'open' });
+      const style = document.createElement('style');
+      style.textContent = cssText;
+      const layer = document.createElement('div');
+      layer.className = 'hh-layer';
+      // The panel positions itself absolutely in the real thing; here it just
+      // sits in the flow so a page of them can be read top to bottom.
+      layer.style.cssText = 'position: static;';
+      shadow.append(style, layer);
+
+      host.append(h, w, shadowHost);
+      document.getElementById('grid').append(host);
+      return layer;
+    }
+
+    function fail(where, err) {
+      failures.push(`${where}: ${err?.message || err}`);
+      const p = document.createElement('p');
+      p.className = 'broke';
+      p.textContent = `${where}\n${err?.stack || err}`;
+      document.getElementById('grid').append(p);
+    }
+
+    /**
+     * Renders a detector's menu and every view reachable from it, one level
+     * into any submenu — which is as deep as the panel itself goes.
+     */
+    function render(detector, sample) {
+      const match = detector.matches(sample, SETTINGS);
+      if (!match) {
+        fail(detector.id, new Error(`no match for ${JSON.stringify(sample)}`));
+        return;
+      }
+
+      const layer = card(detector.id, sample.length > 70 ? `${sample.slice(0, 70)}…` : sample);
+      const api = fakeApi(layer);
+
+      const rows = detector.rows({ text: sample, match, settings: SETTINGS, context: api.context });
+      layer.append(labelled('menu', menu(rows, api)));
+      rendered++;
+
+      for (const row of rows) {
+        if (!row.detail) continue;
+        try {
+          const node = openRow(row, api);
+          layer.append(labelled(row.detailTitle || row.label, node));
+          rendered++;
+
+          // One level down, for the detectors whose real content lives in a
+          // submenu — rewrite's tones, the text tools, the search engines.
+          for (const child of node.hhItems || []) {
+            if (!child.detail) continue;
+            layer.append(labelled(`↳ ${child.detailTitle || child.label}`, openRow(child, api)));
+            rendered++;
+          }
+        } catch (err) {
+          fail(`${detector.id} → ${row.key}`, err);
+        }
+      }
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Samples — one per detector, chosen to match.
+     * ------------------------------------------------------------------ */
+
+    const SAMPLES = {
+      currency: '$50',
+      unit: '5 miles',
+      calc: '12 * 8 + 4',
+      color: '#3f8ae0',
+      datetime: '1700000000',
+      coords: '37.7749, -122.4194',
+      numberbase: '0xFF',
+      decode: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMiLCJuYW1lIjoiQSBOYW1lIn0.abc',
+      regex: '/^a[bc]+(d|e)$/i',
+      texttools: 'Hello brave new world',
+      code: 'function add(a, b) {\n  return a + b;\n}',
+      dictionary: 'serendipity',
+      jargon: 'SLA',
+      translate: 'Hola amigo mio, como estas hoy',
+      summarize: LOREM.repeat(3),
+      rewrite: LOREM,
+      custom: LOREM,
+      qr: 'https://example.com',
+      search: 'brave new world',
+      link: 'https://example.com/page',
+      speak: 'Read this sentence aloud.',
+      highlight: 'a passage worth keeping'
+    };
+
+    for (const detector of LIST) {
+      const sample = SAMPLES[detector.id];
+      if (sample == null) { fail(detector.id, new Error('no sample defined')); continue; }
+      try {
+        render(detector, sample);
+      } catch (err) {
+        fail(detector.id, err);
+      }
+    }
+
+    document.getElementById('summary').textContent =
+      `${rendered} views rendered from ${LIST.length} detectors` +
+      (failures.length ? ` · ${failures.length} FAILED` : ' · no errors');
+    if (failures.length) document.getElementById('summary').style.color = '#c0392b';
+
+    // Follow the browser, so the page chrome does not fight the panels on it.
+    const dark = matchMedia('(prefers-color-scheme: dark)');
+    const applyScheme = () => document.body.classList.toggle('dark', dark.matches);
+    dark.addEventListener('change', applyScheme);
+    applyScheme();
+  </script>
+</body>
+</html>

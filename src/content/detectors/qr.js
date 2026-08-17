@@ -63,19 +63,42 @@ export default {
     };
   },
 
-  items({ text, match }) {
+  rows({ text, match }) {
     return [{
       key: 'qr',
       icon: 'qr',
       label: match.kind === 'link' ? 'QR code for this link' : 'QR code',
       detailTitle: 'QR code',
-      open: (api) => detailView(text.trim(), api)
+      detail: {
+        kind: 'blocks',
+        blocks: [{
+          /*
+           * A matrix of black and white squares, and nothing in the block
+           * vocabulary draws one. There is no image or bitmap block, and
+           * inventing one for the single view that needs it would be a block
+           * type the other twenty never use.
+           *
+           * Encoding stays inside `render` on purpose. rows() runs for every
+           * selection that matches, and Reed-Solomon over a few hundred bytes
+           * is real work to do just to fill in a menu nobody has clicked yet —
+           * so the code is built on the drill-in, as it always was, and that is
+           * also where a failure to encode can still be shown as a message.
+           */
+          type: 'custom',
+          note: 'A QR code is an image, so it needs the browser panel to draw it.',
+          render: (api) => detailView(text.trim(), api)
+        }]
+      }
     }];
   }
 };
 
+/**
+ * The container is plain: the panel's own `hh-detail` wrapper is around this
+ * block already, and a second one would pad the view twice.
+ */
 function detailView(text, api) {
-  const box = el('div', { class: 'hh-detail' });
+  const box = el('div', {});
 
   let result;
   try {

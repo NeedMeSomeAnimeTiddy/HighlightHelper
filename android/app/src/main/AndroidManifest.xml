@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      The only permission the app asks for.
+
+      No storage, no contacts, no accessibility service, no overlay. The extension's
+      privacy posture ports directly: the selection is handled in-process, and the
+      network is used only when the user opens a row that needs it.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".HighlightHelperApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HighlightHelper">
+
+        <!--
+          The entry point that makes this an Android app rather than a browser
+          extension: an entry in the system text-selection toolbar, available in
+          every app on the phone.
+
+          `android:label` IS the menu entry, and the toolbar gives it very little
+          room before it collapses into the overflow — so it is one short word,
+          not the app's full name.
+
+          Transparent theme because the sheet is the whole UI; excludeFromRecents
+          because a conversion is not a task you switch back to.
+        -->
+        <activity
+            android:name=".ProcessTextActivity"
+            android:label="@string/process_text_label"
+            android:theme="@style/Theme.HighlightHelper.Transparent"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The second way in, for apps whose selection toolbar is non-standard and
+          for sharing a whole article rather than a phrase.
+        -->
+        <activity
+            android:name=".ShareActivity"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.HighlightHelper.Transparent"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <!-- The library, history and settings. The options page, rebuilt. -->
+        <activity
+            android:name=".MainActivity"
+            android:label="@string/app_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

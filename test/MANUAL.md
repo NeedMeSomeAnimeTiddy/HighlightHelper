@@ -12,6 +12,32 @@ looks like a bug but isn't one.
 
 ---
 
+## Round 0: every view at once
+
+Before installing anything, look at the panel's own rendering:
+
+```
+node tools/static-server.js
+```
+
+then open <http://localhost:8712/test/views-browser.html>.
+
+Every detector's menu, every detail view it can reach and one level into every submenu — 67
+views — rendered through the real `panel.css` in a real shadow root, with the network and the
+model stubbed so it looks the same twice. Nothing is installed and nothing is clicked.
+
+This exists because `rows()` describes views as data and the Node suite asserts the
+descriptions, which means a wrong description fails a test and a *right* description rendered
+through a class that no longer matches fails nothing at all. This is the page that catches
+the second kind. It is not a substitute for the rounds below — nothing here talks to the
+internet, replaces text on a page, or survives a reload — but a layout that is broken here is
+broken everywhere, and finding it takes a minute rather than an hour.
+
+Switch the **browser or OS** to dark mode and reload to check the dark palette; the panel
+follows `prefers-color-scheme`.
+
+---
+
 ## Before you start: the two error logs
 
 When something goes wrong, the explanation is in one of two places, and they are different

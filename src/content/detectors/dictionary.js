@@ -45,74 +45,85 @@ export default {
     return { word: t };
   },
 
-  items({ match }) {
+  rows({ match }) {
     return [{
       key: 'dictionary',
       icon: 'book',
       label: 'Define',
       value: match.word.toLowerCase(),
       detailTitle: match.word,
-      open: (api) => defineView(match.word, api)
+      // Wiktionary is a network call, and `rows` runs on every selection, so
+      // the lookup waits for the click that opens the row.
+      detail: {
+        kind: 'async',
+        loading: `Looking up “${match.word}”…`,
+        run: (api) => defineBlocks(match.word, api)
+      }
     }];
   }
 };
 
-function defineView(word, api) {
-  const box = el('div', { class: 'hh-detail' });
-
-  const run = async () => {
-    replaceContent(box, spinner(`Looking up “${word}”…`));
-    try {
-      const res = await api.send({
-        type: MSG.DEFINE,
-        word,
-        language: api.settings?.language
-      });
-      if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
-      replaceContent(box, res.entries?.length
-        ? entriesView(word, res, api)
-        : noEntry(word, res.links || []));
-    } catch (err) {
-      replaceContent(box, errorBox(String(err.message || err), { onRetry: run }));
-    }
-    api.resize?.();
-  };
-
-  run();
-  return box;
+async function defineBlocks(word, api) {
+  const res = await api.send({
+    type: MSG.DEFINE,
+    word,
+    language: api.settings?.language
+  });
+  // Thrown rather than caught: the async view turns a rejection into the
+  // panel's own error box, with the retry already wired to run this again.
+  if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
+  return res.entries?.length
+    ? entryBlocks(word, res)
+    : noEntryBlocks(word, res.links || []);
 }
 
-function entriesView(word, res, api) {
-  const wrap = el('div', {});
-
-  const header = el('div', { class: 'hh-row' },
-    el('span', { class: 'hh-label', text: `Wiktionary · ${res.lang}${res.cached ? ' · cached' : ''}` })
-  );
-  if (canSpeak()) {
-    header.append(btn('Say it', () => speak(word, res.lang), { icon: 'speak' }));
-  }
-  wrap.append(header);
-
-  for (const entry of res.entries) {
-    wrap.append(el('div', { class: 'hh-label hh-pos', text: entry.partOfSpeech || '—' }));
-    const list = el('ol', { class: 'hh-defs' });
-    for (const def of entry.definitions) {
-      const li = el('li', {}, el('span', { text: def.text }));
-      if (def.example) li.append(el('em', { class: 'hh-sub', text: def.example }));
-      list.append(li);
-    }
-    wrap.append(list);
-  }
-
+function entryBlocks(word, res) {
   const first = res.entries[0]?.definitions[0]?.text || '';
-  const actions = el('div', { class: 'hh-row' }, copyButton(first, api));
-  wrap.append(actions);
 
-  // Synonyms are a second request, so they wait for a second click. Most
-  // lookups are "what does this mean", not "what else could I have said".
-  synonymButton(word, api, wrap);
+  return [
+    { type: 'label', text: `Wiktionary · ${res.lang}${res.cached ? ' · cached' : ''}` },
+    // Pronunciation is the browser's own speech synthesis, not a second
+    // request — so the button only appears where there is a voice to use it.
+    ...(canSpeak()
+      ? [{
+          type: 'buttons',
+          items: [{ label: 'Say it', icon: 'speak', run: () => speak(word, res.lang) }]
+        }]
+      : []),
 
-  return wrap;
+    // One heading per part of speech, then its senses. The numbering used to
+    // come from an <ol>; as data it has to be in the text, because a list is
+    // not something the block vocabulary can describe.
+    ...res.entries.flatMap((entry) => [
+      { type: 'label', text: entry.partOfSpeech || '—' },
+      ...entry.definitions.flatMap((def, i) => [
+        { type: 'text', text: `${i + 1}. ${def.text}` },
+        ...(def.example ? [{ type: 'sub', text: def.example }] : [])
+      ])
+    ]),
+
+    { type: 'buttons', items: [{ copy: first }] },
+
+    {
+      /*
+       * Synonyms are a second request, so they wait for a second click. Most
+       * lookups are "what does this mean", not "what else could I have said".
+       *
+       * Kept as DOM because that deferral is the whole widget: the button
+       * replaces itself with a panel that then carries its own loading, result
+       * and error states. Describing it as blocks would mean either fetching
+       * the synonyms up front — the cost this design exists to avoid — or
+       * inventing a "button that becomes a panel" block that nothing else uses.
+       */
+      type: 'custom',
+      note: 'Synonyms need the browser panel.',
+      render: (api) => {
+        const host = el('div', {});
+        synonymButton(word, api, host);
+        return host;
+      }
+    }
+  ];
 }
 
 function synonymButton(word, api, host) {
@@ -139,10 +150,18 @@ function synonymButton(word, api, host) {
   return button;
 }
 
-function noEntry(word, links) {
-  return el('div', {},
-    note(`No dictionary entry for “${word}”.`),
-    el('div', { class: 'hh-row' },
-      ...links.map((l) => btn(l.label, () => window.open(l.url, '_blank', 'noopener,noreferrer'))))
-  );
+function noEntryBlocks(word, links) {
+  return [
+    { type: 'note', text: `No dictionary entry for “${word}”.` },
+    {
+      // `run` is a callback, not a node, so the fallbacks stay describable: a
+      // native renderer draws its own buttons and calls back in to open the tab.
+      type: 'buttons',
+      items: links.map((l) => ({ label: l.label, run: () => openTab(l.url) }))
+    }
+  ];
+}
+
+function openTab(url) {
+  window.open(url, '_blank', 'noopener,noreferrer');
 }

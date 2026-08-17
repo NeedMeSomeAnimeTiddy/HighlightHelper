@@ -7,7 +7,6 @@
  * anyway, so the common case needs no click at all.
  */
 
-import { el, menu, replaceContent, resultView, asyncView, errorBox } from '../kit.js';
 import { looksLikeLanguage, plural } from '../../common/text.js';
 
 const MIN_CHARS = 3;
@@ -186,112 +185,133 @@ export default {
     return { stats: stats(text) };
   },
 
-  items({ text, match }) {
+  rows({ text, match }) {
     return [{
       key: 'texttools',
       icon: 'text',
       label: 'Text tools',
       value: plural(match.stats.words, 'word'),
       detailTitle: 'Text tools',
-      open: (api) => menu([
-        {
-          key: 'texttools:count',
-          icon: 'list',
-          label: 'Count',
-          value: `${match.stats.characters} chars`,
-          detailTitle: 'Count',
-          open: () => countView(match.stats)
-        },
-        ...TRANSFORMS.map((t) => {
-          const result = t.fn(text);
-          return {
-            key: `texttools:${t.key}`,
-            icon: 'text',
-            label: t.label,
-            value: preview(result),
-            detailTitle: t.label,
-            open: (ctx) => resultView(result, ctx, { label: t.label })
-          };
-        }),
-
-        // Only when there is more than one line to operate on. A "Sort lines"
-        // row under a sentence is a row that can only disappoint.
-        ...(match.stats.lines > 1
-          ? LINE_OPS.map((t) => {
-              const result = t.fn(text);
-              return {
-                key: `texttools:${t.key}`,
-                icon: 'list',
-                label: t.label,
-                value: preview(result),
-                detailTitle: t.label,
-                open: (ctx) => resultView(result, ctx, { label: t.label })
-              };
-            })
-          : []),
-
-        // Likewise: an extractor that found nothing is not worth a row.
-        ...EXTRACTORS.flatMap((e) => {
-          const found = extract(text, e.re);
-          if (!found.length) return [];
-          const result = found.join('\n');
-          return [{
-            key: `texttools:${e.key}`,
-            icon: 'list',
-            label: e.label,
-            value: plural(found.length, 'found', 'found'),
-            detailTitle: e.label,
-            open: (ctx) => resultView(result, ctx, { label: e.label })
-          }];
-        }),
-
-        {
-          key: 'texttools:hash',
-          icon: 'decode',
-          label: 'SHA-256',
-          detailTitle: 'SHA-256',
-          open: (ctx) => hashView(text, ctx)
-        }
-      ], api)
+      // The one row drills into every tool. A nested `menu` view is the whole
+      // reason this detector can stay a single row at the top level.
+      detail: { kind: 'menu', rows: toolRows(text, match.stats) }
     }];
   }
 };
 
 /**
- * SHA-256 via SubtleCrypto, which is async — hence a view rather than a value.
+ * The submenu: count, then the transforms, then whatever else the selection
+ * happens to support.
  *
- * Hashing the *exact* selection, bytes and all: no trimming, no whitespace
- * collapsing. A hash of something subtly different from what you highlighted
- * would be worse than useless, because it would look like an answer.
+ * The keys are load-bearing beyond this file — a right-click on "Text tools →
+ * URL slug" asks the panel for `texttools:slug` by name, and the context menu
+ * in common/tools.js lists every one of them.
  */
-function hashView(text, api) {
-  return asyncView('Hashing…', async () => {
-    const bytes = new TextEncoder().encode(text);
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    const hex = [...new Uint8Array(digest)]
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    return resultView(hex, api, { label: 'SHA-256' });
-  }, (err) => errorBox(String(err?.message || err)));
+function toolRows(text, counts) {
+  return [
+    {
+      key: 'texttools:count',
+      icon: 'list',
+      label: 'Count',
+      value: `${counts.characters} chars`,
+      detailTitle: 'Count',
+      detail: { kind: 'blocks', blocks: [{ type: 'facts', items: countFacts(counts) }] }
+    },
+    ...TRANSFORMS.map((t) => {
+      const result = t.fn(text);
+      return {
+        key: `texttools:${t.key}`,
+        icon: 'text',
+        label: t.label,
+        value: preview(result),
+        detailTitle: t.label,
+        detail: resultView(result, t.label)
+      };
+    }),
+
+    // Only when there is more than one line to operate on. A "Sort lines"
+    // row under a sentence is a row that can only disappoint.
+    ...(counts.lines > 1
+      ? LINE_OPS.map((t) => {
+          const result = t.fn(text);
+          return {
+            key: `texttools:${t.key}`,
+            icon: 'list',
+            label: t.label,
+            value: preview(result),
+            detailTitle: t.label,
+            detail: resultView(result, t.label)
+          };
+        })
+      : []),
+
+    // Likewise: an extractor that found nothing is not worth a row.
+    ...EXTRACTORS.flatMap((e) => {
+      const found = extract(text, e.re);
+      if (!found.length) return [];
+      const result = found.join('\n');
+      return [{
+        key: `texttools:${e.key}`,
+        icon: 'list',
+        label: e.label,
+        value: plural(found.length, 'found', 'found'),
+        detailTitle: e.label,
+        detail: resultView(result, e.label)
+      }];
+    }),
+
+    {
+      key: 'texttools:hash',
+      icon: 'decode',
+      label: 'SHA-256',
+      detailTitle: 'SHA-256',
+      /**
+       * SHA-256 via SubtleCrypto, which is async — hence an async view rather
+       * than a value on the row.
+       *
+       * Hashing the *exact* selection, bytes and all: no trimming, no
+       * whitespace collapsing. A hash of something subtly different from what
+       * you highlighted would be worse than useless, because it would look
+       * like an answer.
+       */
+      detail: {
+        kind: 'async',
+        loading: 'Hashing…',
+        run: async () => resultBlocks(await sha256(text), 'SHA-256')
+      }
+    }
+  ];
 }
 
-function countView(s) {
-  const box = el('div', { class: 'hh-detail' });
-  const facts = [
-    ['Words', s.words.toLocaleString()],
-    ['Characters', s.characters.toLocaleString()],
-    ['Without spaces', s.charactersNoSpaces.toLocaleString()],
-    ['Sentences', s.sentences.toLocaleString()],
-    ['Lines', s.lines.toLocaleString()],
-    ['Reading time', s.reading]
+/** The text, then Copy / Replace — what nearly every tool here ends in. */
+function resultBlocks(result, label) {
+  return [
+    { type: 'label', text: label },
+    { type: 'text', text: result },
+    { type: 'actions', text: result }
   ];
-  replaceContent(box,
-    el('div', { class: 'hh-facts' },
-      ...facts.map(([label, value]) => el('div', { class: 'hh-fact' },
-        el('em', { text: label }),
-        el('span', { text: value })
-      ))
-    )
-  );
-  return box;
+}
+
+/** The same thing as a whole view, which is what a row's `detail` wants. */
+function resultView(result, label) {
+  return { kind: 'blocks', blocks: resultBlocks(result, label) };
+}
+
+async function sha256(text) {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function countFacts(s) {
+  return [
+    { label: 'Words', value: s.words.toLocaleString() },
+    { label: 'Characters', value: s.characters.toLocaleString() },
+    { label: 'Without spaces', value: s.charactersNoSpaces.toLocaleString() },
+    { label: 'Sentences', value: s.sentences.toLocaleString() },
+    { label: 'Lines', value: s.lines.toLocaleString() },
+    { label: 'Reading time', value: s.reading }
+  ];
 }

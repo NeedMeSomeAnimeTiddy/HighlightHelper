@@ -9,7 +9,7 @@
  * against what it replaced.
  */
 
-import { el, menu, streamView, quote, actionRow, provenance, textBlock } from '../kit.js';
+import { provenance } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { wordCount, looksLikeLanguage, plural } from '../../common/text.js';
 import { isCode } from './codelang.js';
@@ -22,7 +22,7 @@ export const TONES = [
   { action: AI.FORMAL, icon: 'formal', label: 'More formal', busy: 'Formalising…' },
   { action: AI.CASUAL, icon: 'casual', label: 'More casual', busy: 'Loosening up…' },
   // Continue appends instead of replacing, so its result view differs — see
-  // continueView. Copy and Replace act on selection + continuation together,
+  // continueBlocks. Copy and Replace act on selection + continuation together,
   // because replacing your paragraph with only its ending would be wrong.
   { action: AI.CONTINUE, icon: 'continue', label: 'Continue writing', busy: 'Writing on…', appends: true }
 ];
@@ -53,57 +53,61 @@ export default {
     return { words: wordCount(t), chars: t.length };
   },
 
-  items({ text, match }) {
+  rows({ text, match }) {
     return [{
       key: 'rewrite',
       icon: 'rewrite',
       label: 'Rewrite',
       value: plural(match.words, 'word'),
       detailTitle: 'Rewrite',
-      open: (api) => menu(
-        TONES.map((tone) => ({
-          key: `rewrite:${tone.action}`,
-          icon: tone.icon,
-          label: tone.label,
-          detailTitle: tone.label,
-          open: (ctx) => resultView(text, tone, ctx)
-        })),
-        api
-      )
+      // The single row drills into the tones. The nested keys are load-bearing
+      // beyond this file — a right-click on "Rewrite → More formal" asks the
+      // panel for `rewrite:formal` by name, and common/tools.js lists them all.
+      detail: { kind: 'menu', rows: toneRows(text) }
     }];
   }
 };
 
-function resultView(text, tone, api) {
-  return streamView(
-    tone.busy,
-    (emit) => api.ai(tone.action, text, {}, emit),
-    (res) => (tone.appends
-      ? continueView(text, res, api)
-      : el('div', {},
-          el('div', { class: 'hh-label', text: `Was${provenance(res)}` }),
-          quote(text),
-          el('div', { class: 'hh-label', text: tone.label }),
-          textBlock(res.text),
-          actionRow(res.text, api)
-        )),
-    (err, retry) => api.errorFor(err, retry)
-  );
+function toneRows(text) {
+  return TONES.map((tone) => ({
+    key: `rewrite:${tone.action}`,
+    icon: tone.icon,
+    label: tone.label,
+    detailTitle: tone.label,
+    detail: {
+      // A rewrite is long enough that waiting for the whole answer is a visible
+      // pause, so the tokens land as they are written.
+      kind: 'stream',
+      loading: tone.busy,
+      run: (api, emit) => api.ai(tone.action, text, {}, emit),
+      done: (res) => (tone.appends ? continueBlocks(text, res) : rewriteBlocks(text, tone, res))
+    }
+  }));
+}
+
+/** The original above the result, so a grammar fix can be checked against it. */
+function rewriteBlocks(text, tone, res) {
+  return [
+    { type: 'label', text: `Was${provenance(res)}` },
+    { type: 'quote', text },
+    { type: 'label', text: tone.label },
+    { type: 'text', text: res.text, rich: true },
+    { type: 'actions', text: res.text }
+  ];
 }
 
 /**
  * The whole passage, with the original dimmed and the new text in normal
  * weight, so it is obvious what was added. Copy and Replace take both.
+ *
+ * `dim` on a text block is exactly this two-tone rendering, so the appended
+ * case needs no browser-shaped escape hatch of its own.
  */
-function continueView(original, res, api) {
+function continueBlocks(original, res) {
   const joined = /\s$/.test(original) ? original + res.text : `${original} ${res.text}`;
-  return el('div', {},
-    el('div', { class: 'hh-label', text: `Continued${provenance(res)}` }),
-    el('div', { class: 'hh-text' },
-      el('span', { class: 'hh-dim', text: original.trimEnd() }),
-      ' ',
-      el('span', { text: res.text })
-    ),
-    actionRow(joined, api)
-  );
+  return [
+    { type: 'label', text: `Continued${provenance(res)}` },
+    { type: 'text', dim: original.trimEnd(), text: res.text },
+    { type: 'actions', text: joined }
+  ];
 }

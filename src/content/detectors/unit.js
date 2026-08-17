@@ -11,7 +11,6 @@
  * `imperialFlavor` decides whether gallons/pints/fluid ounces are US or UK.
  */
 
-import { el, replaceContent } from '../kit.js';
 import { NUMBER_SRC, parseNumber, formatNumber } from '../../common/numbers.js';
 
 const MAX_LEN = 240;
@@ -403,46 +402,41 @@ export default {
     return { ...found, result };
   },
 
-  items({ match }) {
+  rows({ match }) {
     return [{
       key: 'unit',
       icon: 'unit',
+      // The whole conversion already happened in matches(), so the answer is a
+      // plain string on the row rather than anything the panel has to wait for.
       label: `Convert to ${match.result.toUnit}`,
       value: match.result.toLabel,
       detailTitle: 'Unit conversion',
-      open: () => detailView(match)
+      detail: { kind: 'blocks', blocks: detailBlocks(match) }
     }];
   }
 };
 
-function detailView(match) {
+function detailBlocks(match) {
   const { result } = match;
-  const box = el('div', { class: 'hh-detail' });
 
-  const headline = el('div', { class: 'hh-headline' },
-    el('span', { class: 'hh-from', text: match.fromLabel }),
-    el('span', { class: 'hh-arrow', text: '→' }),
-    el('span', { text: result.toLabel })
-  );
+  const out = [{
+    type: 'headline',
+    from: match.fromLabel,
+    op: '→',
+    text: result.toLabel
+  }];
 
-  const parts = [headline];
-  if (result.sub) parts.push(el('p', { class: 'hh-sub', text: result.sub }));
+  if (result.sub) out.push({ type: 'sub', text: result.sub });
 
-  if (result.extras?.length) {
-    parts.push(
-      el('div', { class: 'hh-facts' },
-        ...result.extras.map((x) => el('div', { class: 'hh-fact' },
-          el('em', { text: x.label }),
-          el('span', { text: x.value })
-        ))
-      )
-    );
-  }
+  // The extras are already { label, value } pairs, which is exactly what a
+  // facts block wants.
+  if (result.extras?.length) out.push({ type: 'facts', items: result.extras });
 
+  // Worth saying only when the normalised reading differs from what was on the
+  // page — "5 ft 11 in" tells you nothing new about a selection that said "5 ft 11 in".
   if (match.raw && match.raw.toLowerCase() !== match.fromLabel.toLowerCase()) {
-    parts.push(el('p', { class: 'hh-sub', text: `Read from “${match.raw}”` }));
+    out.push({ type: 'sub', text: `Read from “${match.raw}”` });
   }
 
-  replaceContent(box, ...parts);
-  return box;
+  return out;
 }
