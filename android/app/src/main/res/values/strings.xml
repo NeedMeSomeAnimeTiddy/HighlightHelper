@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Highlight Helper</string>
+
+    <!--
+      This string IS the entry in Android's text-selection toolbar. The toolbar
+      gives it very little room before collapsing it into the overflow, where
+      most people will never look, so it is one short word rather than the app's
+      full name.
+    -->
+    <string name="process_text_label">Highlight</string>
+</resources>

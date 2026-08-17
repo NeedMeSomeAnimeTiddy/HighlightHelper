@@ -17,3 +17,18 @@ dist/
 node_modules/
 .DS_Store
 Thumbs.db
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.keystore
+*.jks
+# The engine is copied out of src/ by Gradle's syncEngine task. Committing it
+# would mean two copies of the detectors in one repo, and the stale one would
+# eventually be the one somebody read.
+android/app/src/main/assets/engine/src/
