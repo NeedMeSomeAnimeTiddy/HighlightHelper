@@ -86,7 +86,7 @@ dependencies {
  * bundler because the extension has no build step and this must not give it
  * one: `import` resolves natively in a WebView, so the files work as they are.
  */
-val syncEngine by tasks.registering(Copy::class) {
+val syncEngine = tasks.register<Copy>("syncEngine") {
     description = "Copies the extension's JS engine into the app's assets."
     group = "build"
 
@@ -94,6 +94,14 @@ val syncEngine by tasks.registering(Copy::class) {
         // Everything the detectors import, transitively. The panel's own CSS and
         // the options page are browser-only and deliberately left behind.
         include("common/**/*.js")
+        // Only these two of the background modules. They do the encyclopedia
+        // and Wiktionary work, and the bridge gives them a fetch that goes out
+        // through OkHttp. The rest of that folder belongs to the service
+        // worker — deepseek.js holds the key, service-worker.js builds context
+        // menus — and none of it is imported here; shipping it would only put
+        // code that reaches for `chrome.*` inside the APK.
+        include("background/wikipedia.js")
+        include("background/dictionary.js")
         include("content/detectors/**/*.js")
         include("content/kit.js")
         include("content/icons.js")

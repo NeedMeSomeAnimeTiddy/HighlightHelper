@@ -3,8 +3,11 @@ package com.highlighthelper
 import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.webkit.WebView
+import com.highlighthelper.engine.DeepSeekService
 import com.highlighthelper.engine.DetectorEngine
+import com.highlighthelper.engine.HttpService
 import com.highlighthelper.engine.RatesService
+import com.highlighthelper.engine.SecureStore
 
 /**
  * Holds the engine across activities.
@@ -23,6 +26,9 @@ class HighlightHelperApp : Application() {
 
     val engine: DetectorEngine by lazy { DetectorEngine(this) }
     val rates: RatesService by lazy { RatesService() }
+    val http: HttpService by lazy { HttpService() }
+    val secrets: SecureStore by lazy { SecureStore(this) }
+    val deepSeek: DeepSeekService by lazy { DeepSeekService(secrets) }
 
     override fun onCreate() {
         super.onCreate()

@@ -2,6 +2,8 @@ package com.highlighthelper.engine
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -220,9 +222,25 @@ class DetectorEngine(context: Context) {
         .replace(" ", "\\u2028")
         .replace(" ", "\\u2029")
 
+    /**
+     * Runs a script in the engine, from any thread.
+     *
+     * Deliberately NOT `web.post { … }`. `View.post` on a view that is not
+     * attached to a window does not run the runnable — it parks it in the
+     * view's HandlerActionQueue, which is only drained by
+     * `dispatchAttachedToWindow()`. This WebView is headless and never attaches
+     * to anything, so every runnable posted that way waits forever.
+     *
+     * That is not a hypothetical: it is why every reply to a request the engine
+     * made — a rate lookup, an AI call — hung until its caller timed out, while
+     * detection itself worked fine. Detection goes out through `call`, which
+     * dispatches to the main thread directly, and never touched the queue.
+     */
     private fun evaluate(script: String) {
-        web.post { web.evaluateJavascript(script, null) }
+        main.post { web.evaluateJavascript(script, null) }
     }
+
+    private val main = Handler(Looper.getMainLooper())
 
     /**
      * Calls a bridge method and waits for its answer.
@@ -262,7 +280,7 @@ class DetectorEngine(context: Context) {
     }
 
     fun destroy() {
-        web.post {
+        main.post {
             web.removeJavascriptInterface("AndroidHost")
             web.destroy()
         }

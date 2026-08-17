@@ -27,6 +27,8 @@ const assets = path.join(repo, 'android/app/src/main/assets/engine');
 
 const INCLUDES = [
   ['src/common', 'src/common'],
+  ['src/background/wikipedia.js', 'src/background/wikipedia.js'],
+  ['src/background/dictionary.js', 'src/background/dictionary.js'],
   ['src/content/detectors', 'src/content/detectors'],
   ['src/content/kit.js', 'src/content/kit.js'],
   ['src/content/icons.js', 'src/content/icons.js'],
@@ -74,7 +76,9 @@ globalThis.AndroidHost = {
    */
   request(id, messageJson) {
     const message = JSON.parse(messageJson);
+    hostCalls.push(message);
     let reply;
+
     if (message.type === 'hh:rates') {
       reply = {
         ok: true,
@@ -83,12 +87,30 @@ globalThis.AndroidHost = {
         updated: Date.parse('2026-08-12T00:00:00Z'),
         stale: false
       };
+    } else if (message.type === 'http') {
+      // Stands in for OkHttp. The shape is what the real HttpService returns:
+      // a status the lookup modules read directly, and a body they parse.
+      reply = { status: 200, body: JSON.stringify(WIKI_SUMMARY) };
+    } else if (message.type === 'ai' || message.type === 'chat') {
+      reply = { ok: true, text: '  "A stubbed answer."  ', cached: false };
     } else {
       reply = { ok: true };
     }
+
     queueMicrotask(() => window.__hhSettle(id, true, JSON.stringify(reply)));
   }
 };
+
+/** Enough of a Wikipedia summary response for wikipedia.js to accept it. */
+const WIKI_SUMMARY = {
+  type: 'standard',
+  title: 'Service-level agreement',
+  description: 'commitment between a service provider and a client',
+  extract: 'A service-level agreement is a commitment between a service provider and a customer.',
+  content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Service-level_agreement' } }
+};
+
+const hostCalls = [];
 
 // pathToFileURL, because a Windows absolute path is not a URL the ESM loader
 // will take — "c:" reads as a protocol.
@@ -212,6 +234,49 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
   });
   const unsupported = rows.filter((r) => !r.supported).map((r) => r.key);
   check('every row the sheet receives can be rendered', unsupported, []);
+}
+
+/*
+ * The AI path: the prompt is built in JS and Kotlin is a transport.
+ *
+ * What crosses must be a finished system/user pair, because the alternative —
+ * sending an action name and letting Kotlin look up the wording — is a second
+ * copy of every prompt in this project.
+ */
+{
+  const longText = 'The committee met on Tuesday to review the quarterly figures. '.repeat(6);
+  const { session } = await call('detect', { text: longText });
+
+  hostCalls.length = 0;
+  const view = await call('openRow', { session, key: 'summarize' });
+  const blocks = await call('runView', { session, view: view.view });
+
+  const ai = hostCalls.find((c) => c.type === 'ai');
+  check('the AI request carries a built prompt, not an action name',
+    [typeof ai.system, typeof ai.user, 'action' in ai], ['string', 'string', false]);
+  check('the system prompt is the real one', ai.system.includes('summar'), true);
+  check('a streamed view asks the host to stream', ai.stream, true);
+  check('the answer comes back through cleanOutput',
+    blocks.find((b) => b.type === 'text').text, 'A stubbed answer.');
+}
+
+/*
+ * The dictionary, served by the extension's own module through the fetch shim.
+ * Nothing about Wiktionary is reimplemented in Kotlin; this proves the request
+ * leaves as an ordinary host call and the answer is shaped by dictionary.js.
+ */
+{
+  const { session } = await call('detect', { text: 'serendipity' });
+  hostCalls.length = 0;
+
+  const view = await call('openRow', { session, key: 'dictionary' });
+  await call('runView', { session, view: view.view }).catch(() => null);
+
+  const http = hostCalls.find((c) => c.type === 'http');
+  check('a lookup goes out as a plain http request', Boolean(http), true);
+  check('and it is https', http.url.startsWith('https://'), true);
+  check('the engine never asks the host for hh:define',
+    hostCalls.some((c) => c.type === 'hh:define'), false);
 }
 
 /* ---------- report ---------- */

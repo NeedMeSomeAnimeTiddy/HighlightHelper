@@ -24,6 +24,9 @@
 
 import { detect, getDetector } from './src/content/detectors/index.js';
 import { DEFAULTS } from './src/common/settings.js';
+import { buildPrompt, cleanOutput } from './src/common/prompts.js';
+import { lookup, searchLinks, wikiLang } from './src/background/wikipedia.js';
+import { define, synonyms, dictionaryLinks, wiktLang } from './src/background/dictionary.js';
 
 /* ------------------------------------------------------------------ *
  * Calling out to Kotlin
@@ -46,6 +49,31 @@ function hostRequest(message) {
     AndroidHost.request(id, JSON.stringify(message));
   });
 }
+
+/**
+ * `fetch`, rerouted through OkHttp.
+ *
+ * The encyclopedia and dictionary lookups are the extension's own modules —
+ * `src/background/wikipedia.js` and `dictionary.js` — copied in and running
+ * unchanged, which means their URL building, their ranking and their rather
+ * fiddly Wiktionary shaping are not reimplemented here. What they cannot have
+ * is the page's `fetch`: this WebView is not allowed to reach the network, and
+ * a cross-origin request from an asset origin would be at the mercy of whatever
+ * CORS headers each API happens to send.
+ *
+ * So the global is replaced. The three properties those modules actually use —
+ * `status`, `ok`, `json()` — are all this needs to provide, and the request
+ * goes out through Kotlin like every other one.
+ */
+window.fetch = async (url) => {
+  const res = await hostRequest({ type: 'http', url: String(url) });
+  return {
+    status: res.status,
+    ok: res.status >= 200 && res.status < 300,
+    json: async () => JSON.parse(res.body || 'null'),
+    text: async () => res.body || ''
+  };
+};
 
 /** Kotlin's answer to hostRequest, called back in by evaluateJavascript. */
 window.__hhSettle = (id, ok, payload) => {
@@ -77,16 +105,94 @@ function session(id) {
   return s;
 }
 
+/**
+ * The worker's message protocol, answered here.
+ *
+ * The encyclopedia and dictionary calls are served by the extension's own
+ * background modules rather than passed to Kotlin: everything they do beyond
+ * the HTTP request — choosing a wiki language, ranking articles against the
+ * surrounding text, flattening Wiktionary's shape into senses — is pure logic
+ * that already exists and would otherwise be written a second time in Kotlin
+ * and drift. Their `fetch` is the shim above, so the request still goes out
+ * through OkHttp.
+ *
+ * Anything else is Kotlin's: the clipboard, the browser, and DeepSeek.
+ */
+async function handleSend(s, msg) {
+  const settings = s.settings;
+
+  switch (msg?.type) {
+    case 'hh:source': {
+      const term = String(msg.term || '').trim();
+      if (!term) return { ok: false, error: 'Nothing to look up' };
+      const lang = wikiLang(msg.language || settings.language);
+      const articles = await lookup(term, lang, String(msg.context || ''));
+      return { ok: true, articles, cached: false, links: searchLinks(term, lang) };
+    }
+
+    case 'hh:define': {
+      const word = String(msg.word || '').trim();
+      if (!word) return { ok: false, error: 'Nothing to look up' };
+      const lang = wiktLang(msg.language || settings.language);
+      const result = await define(word, lang);
+      return { ok: true, ...result, cached: false, links: dictionaryLinks(word, lang) };
+    }
+
+    case 'hh:synonyms': {
+      const word = String(msg.word || '').trim();
+      if (!word) return { ok: false, error: 'Nothing to look up' };
+      const lang = wiktLang(msg.language || settings.language);
+      return { ok: true, words: await synonyms(word, lang), cached: false };
+    }
+
+    default:
+      return hostRequest(msg);
+  }
+}
+
 /** The api object a task or a view sees. Deliberately a subset of the panel's. */
 function apiFor(s) {
   return {
     settings: s.settings,
     context: { title: '', host: '', url: s.url || '' },
     canReplace: s.canReplace,
-    send: hostRequest,
-    ai: (action, text, options = {}, onChunk = null) =>
-      hostRequest({ type: 'ai', action, text, options, stream: Boolean(onChunk) }),
-    chat: (messages) => hostRequest({ type: 'chat', messages }),
+    send: (msg) => handleSend(s, msg),
+
+    /**
+     * The prompt is built here, not in Kotlin.
+     *
+     * `buildPrompt` holds every instruction this extension gives a model, and
+     * the wording of those is the product. Sending the finished system/user
+     * pair over the bridge keeps Kotlin a transport that knows nothing about
+     * what is being asked — so a prompt improvement lands on both platforms by
+     * editing one file, and `cleanOutput` tidies the answer on the way back
+     * for the same reason.
+     */
+    async ai(action, text, options = {}, onChunk = null) {
+      const merged = { language: s.settings.language, ...options };
+      const prompt = buildPrompt(action, text, merged);
+      const res = await hostRequest({
+        type: 'ai',
+        system: prompt.system,
+        user: prompt.user,
+        maxTokens: prompt.maxTokens,
+        temperature: prompt.temperature,
+        model: merged.model || s.settings.model,
+        stream: Boolean(onChunk)
+      });
+      return { ok: true, text: cleanOutput(res.text || ''), cached: Boolean(res.cached) };
+    },
+
+    async chat(messages, onChunk = null) {
+      const res = await hostRequest({
+        type: 'chat',
+        messages,
+        model: s.settings.model,
+        stream: Boolean(onChunk)
+      });
+      return { ok: true, text: cleanOutput(res.text || '') };
+    },
+
     copy: (text) => hostRequest({ type: 'copy', text }),
     replace: (text) => hostRequest({ type: 'replace', text }),
     openUrl: (url) => hostRequest({ type: 'open', url })
@@ -305,13 +411,40 @@ const METHODS = {
     return view;
   },
 
-  /** Running an async view's body, once its spinner is on screen. */
+  /**
+   * Running a view's body, once its spinner is on screen.
+   *
+   * The two kinds differ in what `run` resolves to, and conflating them was a
+   * bug: an `async` run returns the blocks, but a `stream` run returns the
+   * model's *result*, which only becomes blocks once `done` has shaped it.
+   * Treating a stream like an async view handed the renderer a result object
+   * where a block list belonged, and the finished answer never appeared.
+   */
   runView({ session: id, view }) {
     const s = session(id);
     const spec = s.views.get(view);
     if (!spec) throw new Error('That view is no longer open');
-    return Promise.resolve(spec.run(apiFor(s)))
-      .then((blocks) => (blocks || []).map((b) => describeBlock(s, b)).filter(Boolean));
+
+    const api = apiFor(s);
+    const shape = (list) => (list || []).map((b) => describeBlock(s, b)).filter(Boolean);
+
+    if (spec.kind === 'stream') {
+      /*
+       * `emit` is deliberately a no-op, and must still be passed.
+       *
+       * In the panel it is how tokens reach the view. Here they never travel
+       * this way: Kotlin is the side holding the HTTP connection, so it already
+       * has the answer as it arrives and publishes it to the sheet directly.
+       * What matters is that `emit` is *present* — `api.ai` reads a non-null
+       * callback as "stream this one", so passing null would quietly turn every
+       * summary back into four seconds of spinner.
+       */
+      const emit = () => {};
+      return Promise.resolve(spec.run(api, emit))
+        .then((res) => shape(spec.done(res, api)));
+    }
+
+    return Promise.resolve(spec.run(api)).then(shape);
   },
 
   /** A button inside a rendered view. */

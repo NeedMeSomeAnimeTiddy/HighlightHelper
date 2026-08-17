@@ -48,6 +48,8 @@ class ProcessTextActivity : ComponentActivity() {
             context = this,
             scope = lifecycleScope,
             rates = app.rates,
+            deepSeek = app.deepSeek,
+            http = app.http,
             onReplace = { replacement ->
                 if (readOnly) false else {
                     setResult(

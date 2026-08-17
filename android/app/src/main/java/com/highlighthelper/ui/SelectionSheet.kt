@@ -124,6 +124,7 @@ fun SelectionSheet(
                             session = session,
                             engine = engine,
                             json = json,
+                            services = services,
                             onOpenRow = { row ->
                                 scope.launch {
                                     val id = session ?: return@launch
@@ -277,6 +278,7 @@ private fun DetailView(
     session: Long?,
     engine: DetectorEngine,
     json: Json,
+    services: HostServices,
     onOpenRow: (MenuRowData) -> Unit
 ) {
     val view = screen.view
@@ -299,7 +301,18 @@ private fun DetailView(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
+        val streamed by services.streaming.collectAsState()
+
         when {
+            // A streamed answer replaces its spinner with the first token
+            // rather than with the finished text — for a long summary that is
+            // the difference between four seconds of nothing and reading along
+            // as it arrives. It stays plain while it streams: partial markdown
+            // renders as nonsense, so the formatting waits for the real blocks.
+            running && !streamed.isNullOrEmpty() -> Text(
+                streamed.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium
+            )
             running -> LoadingRow(view.loading)
             failure != null -> Note(failure!!)
             else -> blocks.forEach { block ->
