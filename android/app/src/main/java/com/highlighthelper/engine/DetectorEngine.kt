@@ -2,7 +2,11 @@ package com.highlighthelper.engine
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
@@ -47,29 +51,97 @@ class DetectorEngine(context: Context) {
     /** Set by whoever owns the session — see [HostServices]. */
     var services: HostServices? = null
 
+    /**
+     * Serves the bundled engine over a real https:// origin.
+     *
+     * The path handler is registered at "/" rather than "/engine/", and that
+     * detail is load-bearing: AssetsPathHandler *strips* the prefix it is
+     * registered under before looking the asset up. Registered at "/engine/",
+     * a request for `/engine/index.html` becomes a lookup for `index.html` at
+     * the assets root, which does not exist — the main frame 404s, no script
+     * runs, and the only symptom is that the engine never reports ready.
+     */
     private val assetLoader = WebViewAssetLoader.Builder()
         .setDomain(ASSET_DOMAIN)
-        .addPathHandler("/engine/", WebViewAssetLoader.AssetsPathHandler(app))
+        .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(app))
         .build()
 
     @SuppressLint("SetJavaScriptEnabled")
     private val web: WebView = WebView(app).apply {
         settings.javaScriptEnabled = true
-        // The engine talks to Kotlin, never to the network. Anything the
-        // detectors need fetched goes out through OkHttp, where the API key
-        // lives and where a certificate failure is something we can see.
-        settings.blockNetworkLoads = true
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         settings.domStorageEnabled = true
 
         webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView, request: android.webkit.WebResourceRequest) =
-                assetLoader.shouldInterceptRequest(request.url)
+
+            /**
+             * Every request the page makes, answered from the APK or refused.
+             *
+             * The engine talks to Kotlin and never to the network: anything the
+             * detectors need fetched goes out through OkHttp, where the API key
+             * lives and where a failure is something we can see. That rule is
+             * enforced here, by denying anything the asset loader does not
+             * recognise, rather than with `blockNetworkLoads` — which is a
+             * setting on the same network stack the asset loader has to reach
+             * through, and one more thing to suspect when a page will not load.
+             */
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: android.webkit.WebResourceRequest
+            ): WebResourceResponse? {
+                assetLoader.shouldInterceptRequest(request.url)?.let { return it }
+                Log.w(TAG, "engine asked for something outside the APK: ${request.url}")
+                return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), null)
+            }
+
+            /**
+             * A module that 404s takes the whole engine down, and does it
+             * quietly — `window.onerror` does not fire for a failed module
+             * fetch, so nothing on the JS side is left to report it. Without
+             * this the only symptom is a call that waits out its timeout.
+             */
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: android.webkit.WebResourceRequest,
+                errorResponse: WebResourceResponse
+            ) {
+                val message = "${errorResponse.statusCode} for ${request.url}"
+                Log.e(TAG, "engine resource failed: $message")
+                if (request.isForMainFrame) failToLoad(message)
+            }
+
+            override fun onReceivedError(
+                view: WebView,
+                request: android.webkit.WebResourceRequest,
+                error: android.webkit.WebResourceError
+            ) {
+                val message = "${error.description} for ${request.url}"
+                Log.e(TAG, "engine load error: $message")
+                if (request.isForMainFrame) failToLoad(message)
+            }
+        }
+
+        // JS console output into logcat. The engine has no visible surface, so
+        // without this a detector throwing is invisible unless someone happens
+        // to have chrome://inspect open at the time.
+        webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                Log.d(TAG, "engine: ${message.message()} (${message.sourceId()}:${message.lineNumber()})")
+                return true
+            }
         }
 
         addJavascriptInterface(Host(), "AndroidHost")
         loadUrl("https://$ASSET_DOMAIN/engine/index.html")
+    }
+
+    private fun failToLoad(message: String) {
+        if (!loaded.isCompleted) {
+            loaded.completeExceptionally(
+                IllegalStateException("The detector engine failed to load: $message")
+            )
+        }
     }
 
     /**
@@ -87,9 +159,8 @@ class DetectorEngine(context: Context) {
 
         @JavascriptInterface
         fun failed(message: String) {
-            loaded.completeExceptionally(
-                IllegalStateException("The detector engine failed to load: $message")
-            )
+            Log.e(TAG, "engine reported a load failure: $message")
+            failToLoad(message)
         }
 
         @JavascriptInterface
@@ -162,7 +233,16 @@ class DetectorEngine(context: Context) {
      * and a sheet that never resolves is worse than one that says it failed.
      */
     suspend fun call(method: String, args: JsonElement, timeoutMs: Long = 20_000): JsonElement {
-        withTimeout(ENGINE_LOAD_TIMEOUT_MS) { loaded.await() }
+        // Named rather than left as a bare TimeoutCancellationException: this
+        // firing means the page never came up at all, which is a different
+        // problem from a detector being slow, and the message should say so.
+        try {
+            withTimeout(ENGINE_LOAD_TIMEOUT_MS) { loaded.await() }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            throw EngineException(
+                "The detector engine did not start. Check logcat for tag $TAG."
+            )
+        }
 
         val id = calls.incrementAndGet()
         val slot = CompletableDeferred<JsonElement>()
@@ -196,6 +276,7 @@ class DetectorEngine(context: Context) {
          */
         const val ASSET_DOMAIN = "appassets.androidplatform.net"
         const val ENGINE_LOAD_TIMEOUT_MS = 10_000L
+        const val TAG = "HighlightHelper"
     }
 }
 
