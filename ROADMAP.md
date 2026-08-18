@@ -321,6 +321,40 @@ Not planned, but the reasonable next questions.
 
 ---
 
+## Known small bugs
+
+Found while porting to Android, and deliberately left alone at the time so that a
+refactor stayed a refactor. None of them is urgent; all of them are real, and each is
+recorded here because "someone noticed this once" is not a place a bug can live.
+
+- **A repeated highlight re-adds itself.**
+  [`highlight.js:96`](src/content/detectors/highlight.js:96) guards `painter.add(record)`
+  with `if (!existing)`, where `existing` is the match-time value captured when the view
+  was built. It never changes, so picking a second colour on the same passage runs `add`
+  again — and with it another `safeLocate()`, a full document walk — rather than updating
+  the record already stored. Nothing is corrupted, because `painted` is keyed by id. The
+  guard wants to ask whether a record exists *now*.
+
+- **Coordinates can parse to a silent zero.**
+  `num()` in [`coords.js:33`](src/content/detectors/coords.js:33) yields `0` for a missing
+  DMS group, and the null-island guard at
+  [`coords.js:90`](src/content/detectors/coords.js:90) only rejects when latitude *and*
+  longitude are both exactly zero. A partly-matched pair can therefore come through with a
+  component that was never in the text, and it will look like a real position.
+
+- **DMS seconds are zero-padded to the wrong width.**
+  [`coords.js:69`](src/content/detectors/coords.js:69) pads `sec.toFixed(1)` to four
+  characters, so `9.8` renders as `09.8` — the detail view shows `122°25'09.8"W` for a
+  selection that said `122°25'9.8"W`. Cosmetic, and it makes the conversion look like it
+  changed something it did not.
+
+Two that were reported and are already gone, noted so they are not re-investigated: the
+calculator's duplicated *Exact* / *Rounded* row is fixed, and `speak.js` reading
+`isSpeaking()` immediately after `speak()` disappeared when read-aloud became the
+`speech` block, which sets its own label rather than asking.
+
+---
+
 ## Deliberately left out
 
 In the spirit of the README's *Known limitations* — the things that were considered and
