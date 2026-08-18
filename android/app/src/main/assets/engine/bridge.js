@@ -33,6 +33,7 @@ import { CONTEXT_TOOLS } from './src/common/tools.js';
 import { AI } from './src/common/constants.js';
 import { LANGUAGES } from './src/common/languages.js';
 import { CURRENCY_CODES, currencyName } from './src/common/currencies.js';
+import { PROVIDERS, resolveProvider } from './src/common/providers.js';
 
 /* ------------------------------------------------------------------ *
  * Calling out to Kotlin
@@ -181,6 +182,25 @@ async function handleSend(s, msg) {
   }
 }
 
+/**
+ * The chosen service, flattened into the four facts Kotlin needs.
+ *
+ * Sent with every request rather than read once at startup, because the
+ * settings screen can change it between one selection and the next and there is
+ * no reload in between.
+ */
+function describeProvider(settings, overrides = {}) {
+  const chosen = resolveProvider(settings, overrides);
+  return {
+    id: chosen.id,
+    name: chosen.name,
+    api: chosen.api,
+    endpoint: chosen.endpoint,
+    model: chosen.model,
+    needsKey: chosen.needsKey
+  };
+}
+
 /** The api object a task or a view sees. Deliberately a subset of the panel's. */
 function apiFor(s) {
   return {
@@ -208,7 +228,16 @@ function apiFor(s) {
         user: prompt.user,
         maxTokens: prompt.maxTokens,
         temperature: prompt.temperature,
-        model: merged.model || s.settings.model,
+        /*
+         * Which service, resolved here rather than in Kotlin.
+         *
+         * The registry lives in `src/common/providers.js` and this is the same
+         * `resolveProvider` the extension's worker calls, so the endpoint, the
+         * model fallback and the wire format are decided once for both
+         * platforms. Kotlin is left holding what it should hold: a credential
+         * and a socket.
+         */
+        provider: describeProvider(s.settings, merged),
         stream: Boolean(onChunk)
       });
       const answer = cleanOutput(res.text || '');
@@ -236,7 +265,7 @@ function apiFor(s) {
       const res = await hostRequest({
         type: 'chat',
         messages,
-        model: s.settings.model,
+        provider: describeProvider(s.settings),
         stream: Boolean(onChunk)
       });
       return { ok: true, text: cleanOutput(res.text || '') };
@@ -679,7 +708,22 @@ const METHODS = {
       // they already exist, and a hand-maintained Kotlin copy would be wrong
       // the first time one of them changed.
       languages: LANGUAGES,
-      currencies: [...CURRENCY_CODES].sort().map((code) => [code, currencyName(code)])
+      currencies: [...CURRENCY_CODES].sort().map((code) => [code, currencyName(code)]),
+      // The model services, for the same reason again: the settings screen
+      // needs names, key links, model suggestions and which ones let their
+      // endpoint be typed. All of that is stated in providers.js and none of it
+      // is worth restating in Kotlin.
+      providers: PROVIDERS.map((p) => ({
+        id: p.id,
+        name: p.name,
+        models: p.models,
+        defaultModel: p.defaultModel,
+        keysAt: p.keysAt || '',
+        keyHint: p.keyHint || '',
+        note: p.note || '',
+        needsKey: p.needsKey !== false,
+        editableEndpoint: Boolean(p.editableEndpoint)
+      }))
     };
   }
 };

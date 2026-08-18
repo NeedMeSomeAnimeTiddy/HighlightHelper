@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -90,6 +92,31 @@ private class EngineDefaults(payload: JsonObject) {
 
     val currencies: List<Pair<String, String>> = payload["currencies"].asCodeNamePairs()
 
+    /**
+     * The model services, straight off `src/common/providers.js`.
+     *
+     * Same reasoning as the lists above, with more at stake: an endpoint kept
+     * in Kotlin as well as in the registry is an endpoint that can disagree
+     * with the one the engine resolved, and the failure would be a request sent
+     * somewhere nobody chose.
+     */
+    val providers: List<ProviderInfo> =
+        payload["providers"]?.jsonArrayOrNull().orEmpty().mapNotNull { entry ->
+            val row = entry.jsonObjectOrNull() ?: return@mapNotNull null
+            val id = row["id"]?.text() ?: return@mapNotNull null
+            ProviderInfo(
+                id = id,
+                name = row["name"]?.text() ?: id,
+                models = row["models"]?.jsonArrayOrNull().orEmpty().mapNotNull { it.text() },
+                defaultModel = row["defaultModel"]?.text().orEmpty(),
+                keysAt = row["keysAt"]?.text().orEmpty(),
+                keyHint = row["keyHint"]?.text().orEmpty(),
+                note = row["note"]?.text().orEmpty(),
+                needsKey = (row["needsKey"] as? JsonPrimitive)?.booleanOrNull ?: true,
+                editableEndpoint = (row["editableEndpoint"] as? JsonPrimitive)?.booleanOrNull ?: false
+            )
+        }
+
     /** The per-detector defaults, which live under `settings`, not `detectors`. */
     private val detectorDefaults: JsonObject =
         settings["detectors"]?.jsonObjectOrNull() ?: JsonObject(emptyMap())
@@ -97,6 +124,19 @@ private class EngineDefaults(payload: JsonObject) {
     fun defaultFor(id: String): Boolean =
         detectorDefaults[id]?.jsonPrimitive?.booleanOrNull ?: true
 }
+
+/** One row of the provider registry, as the settings screen needs it. */
+data class ProviderInfo(
+    val id: String,
+    val name: String,
+    val models: List<String>,
+    val defaultModel: String,
+    val keysAt: String,
+    val keyHint: String,
+    val note: String,
+    val needsKey: Boolean,
+    val editableEndpoint: Boolean
+)
 
 private fun JsonElement?.asCodeNamePairs(): List<Pair<String, String>> =
     this?.jsonArrayOrNull().orEmpty().mapNotNull { entry ->
@@ -208,7 +248,12 @@ private fun SettingsScreen(app: HighlightHelperApp) {
 
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
-        ApiKeySection(app)
+        ProviderSection(
+            app = app,
+            providers = defaults?.providers.orEmpty(),
+            settings = settings,
+            save = save
+        )
 
         when {
             loaded?.isFailure == true -> {
@@ -253,54 +298,176 @@ private fun SettingsScreen(app: HighlightHelperApp) {
     }
 }
 
+/**
+ * Which service answers, and the key for it.
+ *
+ * Deliberately still above the engine gate, and deliberately able to render
+ * without it: when the WebView fails to start this is the one section that has
+ * to keep working, because a wrong or missing key is one of the few causes a
+ * user can actually fix. Without the engine there is no list to pick from, so
+ * it falls back to a bare key field for whichever service was last saved.
+ */
 @Composable
-private fun ApiKeySection(app: HighlightHelperApp) {
-    var key by remember { mutableStateOf(app.secrets.apiKey) }
-    var saved by remember { mutableStateOf(false) }
+private fun ProviderSection(
+    app: HighlightHelperApp,
+    providers: List<ProviderInfo>,
+    settings: Settings?,
+    save: (JsonObject) -> Unit
+) {
+    val links = LocalUriHandler.current
+
+    val serviceId = settings?.string("aiService")?.ifEmpty { null } ?: DEFAULT_SERVICE
+    val entry = providers.firstOrNull { it.id == serviceId }
+    val name = entry?.name ?: serviceId.replaceFirstChar { it.uppercase() }
+
+    // Keyed on the service, so switching the picker shows that service's saved
+    // key rather than carrying the previous one across into a field that would
+    // then overwrite it on Save.
+    var key by remember(serviceId) { mutableStateOf(app.secrets.keyFor(serviceId)) }
+    var model by remember(serviceId) { mutableStateOf(settings?.string("model").orEmpty()) }
+    var endpoint by remember(serviceId) { mutableStateOf(settings?.string("aiEndpoint").orEmpty()) }
+    var saved by remember(serviceId) { mutableStateOf(false) }
 
     SectionHeader(
-        "DeepSeek API key",
+        "Which service",
         "Needed for explain, translate, summarise, rewrite and the code " +
             "tools. Conversions, the calculator, colours, dates, regex and the " +
-            "text tools all work without one."
+            "text tools all work without any of this."
     )
 
+    if (providers.isNotEmpty()) {
+        PickerSetting(
+            label = "Service",
+            options = providers.map { it.id to it.name },
+            selected = serviceId,
+            showCode = false,
+            onPick = { picked ->
+                /*
+                 * The model and endpoint are cleared, not kept. A stored
+                 * `deepseek-chat` following someone to OpenAI is a 404 that
+                 * reads like a broken app, and empty already means "this
+                 * service's own default" everywhere it is read.
+                 */
+                model = ""
+                endpoint = ""
+                save(buildJsonObject {
+                    put("aiService", picked)
+                    put("model", "")
+                    put("aiEndpoint", "")
+                })
+            }
+        )
+    }
+
+    if (entry?.note?.isNotEmpty() == true) {
+        Text(
+            entry.note,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    if (entry?.editableEndpoint == true) {
+        OutlinedTextField(
+            value = endpoint,
+            onValueChange = { endpoint = it; saved = false },
+            label = { Text("Endpoint") },
+            placeholder = { Text("https://…/v1/chat/completions") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    if (entry == null || entry.needsKey) {
+        OutlinedTextField(
+            value = key,
+            onValueChange = { key = it; saved = false },
+            label = { Text("API key") },
+            placeholder = { Text(entry?.keyHint.orEmpty().ifEmpty { "…" }) },
+            singleLine = true,
+            // Masked by default: this is a credential, and the
+            // screen it is typed on is over whatever app the
+            // user was reading.
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
     OutlinedTextField(
-        value = key,
-        onValueChange = { key = it; saved = false },
-        label = { Text("sk-…") },
+        value = model,
+        onValueChange = { model = it; saved = false },
+        label = { Text("Model") },
+        placeholder = { Text(entry?.defaultModel.orEmpty().ifEmpty { "model id" }) },
         singleLine = true,
-        // Masked by default: this is a credential, and the
-        // screen it is typed on is over whatever app the
-        // user was reading.
-        visualTransformation = PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         modifier = Modifier.fillMaxWidth()
     )
 
+    /*
+     * Suggestions rather than a menu. Model ids change faster than this app
+     * ships, so the field stays free text and these are shortcuts — a picker
+     * would eventually be a list of names that no longer exist, with no way to
+     * type the one that does.
+     */
+    if (entry?.models?.isNotEmpty() == true) {
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            entry.models.forEach { suggestion ->
+                AssistChip(
+                    onClick = { model = suggestion; saved = false },
+                    label = { Text(suggestion) }
+                )
+            }
+        }
+    }
+
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = {
-            app.secrets.apiKey = key
+            app.secrets.setKey(serviceId, key)
+            save(buildJsonObject {
+                put("aiService", serviceId)
+                put("model", model.trim())
+                put("aiEndpoint", endpoint.trim())
+            })
             saved = true
         }) { Text(if (saved) "Saved" else "Save") }
 
-        if (app.secrets.hasKey) {
+        if (app.secrets.hasKeyFor(serviceId)) {
             OutlinedButton(onClick = {
-                app.secrets.apiKey = ""
+                app.secrets.setKey(serviceId, "")
                 key = ""
                 saved = false
-            }) { Text("Forget it") }
+            }) { Text("Forget the key") }
+        }
+
+        if (entry?.keysAt?.isNotEmpty() == true) {
+            TextButton(onClick = { links.openUri(entry.keysAt) }) { Text("Get a key") }
         }
     }
 
     Text(
-        "Stored encrypted on this device, and sent only to " +
-            "api.deepseek.com. It never reaches the page the selection " +
-            "came from.",
+        "Each service keeps its own key, stored encrypted on this device and " +
+            "sent nowhere but that service. A key never reaches the app the " +
+            "selection came from, and never enters the detector engine.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Text(
+        "Signing in with a ChatGPT or Claude.ai subscription is not an option " +
+            "here, and cannot be: neither company offers a way for an app like " +
+            "this one to spend a chat subscription. These keys are billed per " +
+            "request on the provider's own account.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
+
+/** Matches DEFAULT_PROVIDER in src/common/providers.js — used only before the engine answers. */
+private const val DEFAULT_SERVICE = "deepseek"
 
 @Composable
 private fun ConversionsSection(settings: Settings, save: (JsonObject) -> Unit) {
@@ -532,14 +699,17 @@ private fun PickerSetting(
     label: String,
     options: List<Pair<String, String>>,
     selected: String,
-    onPick: (String) -> Unit
+    onPick: (String) -> Unit,
+    /** Off for lists whose ids are plumbing rather than something to recognise. */
+    showCode: Boolean = true
 ) {
     var open by remember { mutableStateOf(false) }
 
     // The code as well as the name, because "US Dollar" and "USD" are not
     // equally recognisable and the second is what the converted row will say.
+    // A provider id is not like that — "OpenAI (openai)" is just noise.
     val shown = options.firstOrNull { it.first == selected }
-        ?.let { (code, name) -> "$name ($code)" }
+        ?.let { (code, name) -> if (showCode) "$name ($code)" else name }
         ?: selected.ifEmpty { "—" }
 
     Row(

@@ -1,5 +1,6 @@
 import { getSettings, saveSettings, getApiKey } from '../common/settings.js';
 import { MSG, PROVIDER } from '../common/constants.js';
+import { resolveProvider } from '../common/providers.js';
 import { localStatus } from '../content/local-ai.js';
 import { forPage } from '../common/highlights-store.js';
 
@@ -19,17 +20,22 @@ async function renderProviderState() {
   const state = $('keyState');
   const settings = await getSettings();
   const provider = settings.aiProvider || PROVIDER.AUTO;
-  const key = await getApiKey();
+  const service = resolveProvider(settings);
+  // A provider that needs no key — a local Ollama — is configured as soon as it
+  // is chosen, so "no key" must not read as "not set up" for it.
+  const key = service.needsKey ? await getApiKey(service.id) : 'n/a';
 
   if (provider === PROVIDER.CLOUD) {
     state.textContent = key
-      ? 'DeepSeek key saved. All tools available.'
-      : 'No DeepSeek key — the local tools still work.';
+      ? `${service.name} key saved. All tools available.`
+      : `No ${service.name} key — the local tools still work.`;
     state.className = key ? 'key' : 'key bad';
     return;
   }
 
-  state.textContent = key ? 'DeepSeek key saved. Checking for the on-device model…' : 'Checking for the on-device model…';
+  state.textContent = key
+    ? `${service.name} key saved. Checking for the on-device model…`
+    : 'Checking for the on-device model…';
   state.className = 'key';
 
   const { model, summarizer } = await localStatus();
@@ -39,10 +45,10 @@ async function renderProviderState() {
     state.textContent = 'On-device model ready — nothing leaves this machine.';
     state.className = 'key';
   } else if (key) {
-    state.textContent = 'DeepSeek key saved. All tools available.';
+    state.textContent = `${service.name} key saved. All tools available.`;
     state.className = 'key';
   } else if (provider === PROVIDER.LOCAL) {
-    state.textContent = 'No on-device model yet, and DeepSeek is switched off. See settings.';
+    state.textContent = `No on-device model yet, and ${service.name} is switched off. See settings.`;
     state.className = 'key bad';
   } else {
     state.textContent = 'No AI provider yet — the local tools still work. See settings.';

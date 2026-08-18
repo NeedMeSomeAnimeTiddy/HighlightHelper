@@ -1,10 +1,12 @@
 /**
  * Settings live in two places on purpose:
  *   chrome.storage.sync  -> preferences (small, roam between machines)
- *   chrome.storage.local -> the DeepSeek API key, rate cache, response cache
+ *   chrome.storage.local -> API keys, rate cache, response cache
  *
- * The API key is NEVER put in sync storage and never ships in the source.
+ * API keys are NEVER put in sync storage and never ship in the source.
  */
+
+import { DEFAULT_PROVIDER } from './providers.js';
 
 export const DEFAULTS = {
   /** ISO 4217 code that currency amounts get converted into. */
@@ -19,10 +21,25 @@ export const DEFAULTS = {
   /**
    * 'auto' | 'local' | 'cloud' — see PROVIDER in constants.js.
    *
-   * 'auto' prefers Chrome's on-device model and falls back to DeepSeek, which
-   * is what makes the extension useful before anyone has pasted a key.
+   * 'auto' prefers Chrome's on-device model and falls back to the hosted
+   * service, which is what makes the extension useful before anyone has pasted
+   * a key.
+   *
+   * This is *where* an answer comes from. Which hosted service it falls back to
+   * is `aiService` below — a separate axis, because "keep my text on this
+   * machine" and "I have an OpenAI key rather than a DeepSeek one" are
+   * unrelated questions.
    */
   aiProvider: 'auto',
+
+  /** Which hosted service. An id from common/providers.js. */
+  aiService: DEFAULT_PROVIDER,
+
+  /**
+   * The endpoint, for the providers that have no fixed one — `custom` and a
+   * self-hosted Ollama. Empty means "use whatever the registry says".
+   */
+  aiEndpoint: '',
 
   /** Per-detector on/off switches, keyed by detector id. */
   detectors: {
@@ -80,8 +97,12 @@ export const DEFAULTS = {
   minRewriteChars: 40,
   /** How long AI responses stay cached, in days. */
   cacheDays: 7,
-  /** DeepSeek model id. */
-  model: 'deepseek-chat'
+  /**
+   * Model id. Empty means the chosen provider's own default, which is what
+   * makes switching provider safe — a stored `deepseek-chat` would otherwise
+   * follow the user to OpenAI and 404 there.
+   */
+  model: ''
 };
 
 /** Reads settings merged over defaults (nested `detectors` merged too). */
@@ -111,14 +132,49 @@ export async function saveSettings(patch) {
   return next;
 }
 
-/** The DeepSeek key. Local storage only — background script use. */
-export async function getApiKey() {
-  const { deepseekApiKey = '' } = await chrome.storage.local.get('deepseekApiKey');
-  return deepseekApiKey.trim();
+/**
+ * API keys, one per provider. Local storage only — background script use.
+ *
+ * Keyed by provider id rather than kept as a single string, because otherwise
+ * trying OpenAI for an afternoon and going back to DeepSeek means pasting a key
+ * twice. Storage is cheap; re-finding a key on a provider's dashboard is not.
+ */
+async function allKeys() {
+  const { apiKeys = {}, deepseekApiKey = '' } = await chrome.storage.local.get([
+    'apiKeys',
+    'deepseekApiKey'
+  ]);
+
+  // The pre-registry single key. Read here rather than migrated on install,
+  // because an update handler that runs once has no second chance if it throws,
+  // and a fold that happens on every read cannot be missed. It is written back
+  // under the new shape the first time a key is saved.
+  if (deepseekApiKey && !apiKeys.deepseek) {
+    return { ...apiKeys, deepseek: deepseekApiKey.trim() };
+  }
+  return apiKeys;
 }
 
-export async function setApiKey(key) {
-  await chrome.storage.local.set({ deepseekApiKey: (key || '').trim() });
+export async function getApiKey(providerId) {
+  const id = providerId || (await getSettings()).aiService || DEFAULT_PROVIDER;
+  const keys = await allKeys();
+  return (keys[id] || '').trim();
+}
+
+export async function setApiKey(providerId, key) {
+  const id = providerId || (await getSettings()).aiService || DEFAULT_PROVIDER;
+  const keys = { ...(await allKeys()), [id]: (key || '').trim() };
+  if (!keys[id]) delete keys[id];
+  await chrome.storage.local.set({ apiKeys: keys });
+  // The old single-key entry is dropped once its value has a home in the new
+  // map, so the credential does not sit in two places on disk.
+  await chrome.storage.local.remove('deepseekApiKey');
+}
+
+/** Which providers currently have a key — for "is anything configured at all". */
+export async function configuredProviders() {
+  const keys = await allKeys();
+  return Object.keys(keys).filter((id) => (keys[id] || '').trim());
 }
 
 /** Fires `cb(newSettings)` whenever preferences change in any context. */

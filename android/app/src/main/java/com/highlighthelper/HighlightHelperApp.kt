@@ -6,7 +6,7 @@ import android.webkit.WebView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import com.highlighthelper.engine.DeepSeekService
+import com.highlighthelper.engine.AiService
 import com.highlighthelper.engine.DetectorEngine
 import com.highlighthelper.engine.HostServices
 import com.highlighthelper.engine.HttpService
@@ -35,7 +35,7 @@ class HighlightHelperApp : Application() {
     val rates: RatesService by lazy { RatesService() }
     val http: HttpService by lazy { HttpService() }
     val secrets: SecureStore by lazy { SecureStore(this) }
-    val deepSeek: DeepSeekService by lazy { DeepSeekService(secrets) }
+    val ai: AiService by lazy { AiService(secrets) }
     val settings: SettingsStore by lazy { SettingsStore(this) }
     val cache: ResponseCache by lazy { ResponseCache(this) }
     val store: KeyValueStore by lazy { KeyValueStore(this) }
@@ -56,7 +56,7 @@ class HighlightHelperApp : Application() {
             context = this,
             scope = appScope,
             rates = rates,
-            deepSeek = deepSeek,
+            ai = ai,
             http = http,
             cache = cache,
             store = store,

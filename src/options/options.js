@@ -8,6 +8,7 @@ import {
 import { CURRENCIES } from '../common/currencies.js';
 import { LANGUAGES } from '../common/languages.js';
 import { MSG, ERR, PROVIDER } from '../common/constants.js';
+import { PROVIDERS, DEFAULT_PROVIDER, providerById, originFor } from '../common/providers.js';
 import { LIST as DETECTOR_LIST } from '../content/detectors/index.js';
 import { localStatus, downloadModel } from '../content/local-ai.js';
 import { DEFAULT_ENGINES } from '../common/searchengines.js';
@@ -477,16 +478,16 @@ function wireSearchEngines() {
 
 /* ---------- where AI runs ---------- */
 
-const PROVIDER_HINT = {
+const providerHints = (name) => ({
   [PROVIDER.AUTO]:
     'Anything the on-device model can handle stays on this machine. Long selections and ' +
-    'anything it cannot do fall through to DeepSeek.',
+    `anything it cannot do fall through to ${name}.`,
   [PROVIDER.LOCAL]:
-    'Nothing is ever sent to DeepSeek. Tools the on-device model cannot serve — usually ' +
+    `Nothing is ever sent to ${name}. Tools the on-device model cannot serve — usually ` +
     'because the selection is too long for its context window — will say so instead.',
   [PROVIDER.CLOUD]:
-    'Every AI tool goes to DeepSeek and needs the API key below.'
-};
+    `Every AI tool goes to ${name} and needs the API key below.`
+});
 
 /** Turns the raw availability strings into one sentence and maybe a button. */
 function describeLocal({ supported, model, summarizer }) {
@@ -526,14 +527,19 @@ async function refreshLocalStatus() {
   button.hidden = !state.offerDownload;
 }
 
+function refreshProviderHint() {
+  const select = $('aiProvider');
+  const name = providerById(settings.aiService || DEFAULT_PROVIDER).name;
+  $('providerHint').textContent = providerHints(name)[select.value] || '';
+}
+
 function wireProvider() {
   const select = $('aiProvider');
   select.value = settings.aiProvider || PROVIDER.AUTO;
-  $('providerHint').textContent = PROVIDER_HINT[select.value] || '';
+  refreshProviderHint();
 
   select.addEventListener('change', (e) => {
-    $('providerHint').textContent = PROVIDER_HINT[e.target.value] || '';
-    persist({ aiProvider: e.target.value });
+    persist({ aiProvider: e.target.value }).then(refreshProviderHint);
   });
 
   $('downloadModel').addEventListener('click', async () => {
@@ -560,17 +566,110 @@ function wireProvider() {
   refreshLocalStatus();
 }
 
-/* ---------- API key ---------- */
+/* ---------- which service, and its key ---------- */
 
-async function wireApiKey() {
+/**
+ * Permission for the origin this provider talks to.
+ *
+ * Only DeepSeek's host is in `host_permissions`; every other one is optional
+ * and asked for here, at the moment somebody picks it. That keeps the install
+ * prompt honest — an extension that declares nine AI companies up front looks
+ * like it talks to nine AI companies — and it means the "anything else"
+ * provider can reach a host nobody could have listed in advance.
+ *
+ * Must be called from inside a click handler: Chrome rejects a permission
+ * request that isn't attached to a user gesture, and awaiting anything first
+ * consumes it.
+ */
+async function ensureOrigin(endpoint) {
+  const origin = originFor(endpoint);
+  if (!origin) return true;
+  try {
+    if (await chrome.permissions.contains({ origins: [origin] })) return true;
+    return await chrome.permissions.request({ origins: [origin] });
+  } catch {
+    // Some origins can't be requested at all (a bare IP with no scheme, say).
+    // Letting the call proceed produces a real network error, which says more
+    // than a permissions message would.
+    return true;
+  }
+}
+
+/** The form's current state, which may differ from what is saved. */
+function formProvider() {
+  const id = $('aiService').value;
+  const entry = providerById(id);
+  return {
+    id,
+    entry,
+    endpoint: ($('aiEndpoint').value || '').trim() || entry.endpoint,
+    model: ($('model').value || '').trim() || entry.defaultModel
+  };
+}
+
+/** Redraws everything that depends on which service is selected. */
+async function renderService() {
+  const entry = providerById($('aiService').value);
+
+  $('serviceNote').textContent = entry.note || '';
+  if (entry.keysAt) {
+    const link = document.createElement('a');
+    link.href = entry.keysAt;
+    link.target = '_blank';
+    link.rel = 'noreferrer noopener';
+    link.textContent = 'Get a key';
+    $('serviceNote').append(' ', link);
+  }
+
+  $('endpointField').hidden = !entry.editableEndpoint;
+  $('aiEndpoint').placeholder = entry.endpoint || 'https://…/v1/chat/completions';
+
+  $('keyField').hidden = entry.needsKey === false;
+  $('apiKey').placeholder = entry.keyHint || '';
+  $('keyHint').textContent = entry.needsKey === false
+    ? ''
+    : 'Stored in this browser only, and sent to nowhere but this service.';
+
+  const suggestions = $('modelSuggestions');
+  suggestions.replaceChildren(
+    ...entry.models.map((id) => Object.assign(document.createElement('option'), { value: id }))
+  );
+  $('model').placeholder = entry.defaultModel || 'model id';
+
+  // The key belongs to the provider, not to the form, so switching the picker
+  // shows that provider's saved key rather than carrying the last one across.
+  const saved = await getApiKey(entry.id);
+  $('apiKey').value = saved;
+  flash($('keyStatus'), saved ? 'A key is saved for this service.' : '', saved ? 'ok' : '');
+}
+
+async function wireService() {
+  fillSelect($('aiService'), PROVIDERS.map((p) => [p.id, p.name]));
+  $('aiService').value = settings.aiService || DEFAULT_PROVIDER;
+  $('aiEndpoint').value = settings.aiEndpoint || '';
+  $('model').value = settings.model || '';
+  await renderService();
+
+  $('aiService').addEventListener('change', async (e) => {
+    /*
+     * The model is cleared, not kept. `deepseek-chat` following someone to
+     * OpenAI is a 404 that reads like a broken extension, and the empty value
+     * already means "this service's default" everywhere it is read.
+     */
+    $('model').value = '';
+    $('aiEndpoint').value = '';
+    await persist({ aiService: e.target.value, model: '', aiEndpoint: '' });
+    await renderService();
+    refreshProviderHint();
+  });
+
+  $('model').addEventListener('change', () => persist({ model: $('model').value.trim() }));
+  $('aiEndpoint').addEventListener('change', () =>
+    persist({ aiEndpoint: $('aiEndpoint').value.trim() })
+  );
+
   const input = $('apiKey');
   const status = $('keyStatus');
-  const existing = await getApiKey();
-
-  if (existing) {
-    input.value = existing;
-    flash(status, 'A key is saved.', 'ok');
-  }
 
   $('toggleKey').addEventListener('click', () => {
     const showing = input.type === 'text';
@@ -579,37 +678,73 @@ async function wireApiKey() {
   });
 
   $('saveKey').addEventListener('click', async () => {
+    const { id, entry, endpoint, model } = formProvider();
     const value = input.value.trim();
-    if (!value) {
+
+    if (entry.needsKey !== false && !value) {
       flash(status, 'Paste a key first.', 'bad');
       return;
     }
-    await setApiKey(value);
-    flash(status, 'Key saved to local storage.', 'ok');
+    if (!endpoint) {
+      flash(status, 'This service needs an endpoint.', 'bad');
+      return;
+    }
+    if (!(await ensureOrigin(endpoint))) {
+      flash(status, `Not saved — ${entry.name} needs permission to be reached.`, 'bad');
+      return;
+    }
+
+    await setApiKey(id, value);
+    await persist({
+      aiService: id,
+      model: ($('model').value || '').trim(),
+      aiEndpoint: ($('aiEndpoint').value || '').trim()
+    });
+    refreshProviderHint();
+    flash(status, `Saved. Answers will come from ${entry.name} (${model}).`, 'ok');
   });
 
   $('clearKey').addEventListener('click', async () => {
-    await setApiKey('');
+    const { id } = formProvider();
+    await setApiKey(id, '');
     input.value = '';
     flash(status, 'Key removed.', 'ok');
   });
 
   $('testKey').addEventListener('click', async () => {
+    const { id, entry, endpoint, model } = formProvider();
     const value = input.value.trim();
-    if (!value) {
+
+    if (entry.needsKey !== false && !value) {
       flash(status, 'Paste a key first.', 'bad');
       return;
     }
+    if (!endpoint) {
+      flash(status, 'This service needs an endpoint.', 'bad');
+      return;
+    }
+    if (!(await ensureOrigin(endpoint))) {
+      flash(status, `Can't test — ${entry.name} needs permission to be reached.`, 'bad');
+      return;
+    }
+
     flash(status, 'Testing…');
-    const res = await chrome.runtime.sendMessage({ type: MSG.TEST_KEY, key: value });
+    const res = await chrome.runtime.sendMessage({
+      type: MSG.TEST_KEY,
+      key: value,
+      providerId: id,
+      endpoint,
+      model
+    });
+
     if (res?.ok) {
       flash(status, `Works — responded as ${res.model}.`, 'ok');
     } else {
       const messages = {
-        [ERR.BAD_KEY]: 'DeepSeek rejected that key.',
+        [ERR.BAD_KEY]: `${entry.name} rejected that key.`,
         [ERR.NO_FUNDS]: 'Key is valid but the account has no credit.',
         [ERR.RATE_LIMIT]: 'Rate-limited — try again shortly.',
-        [ERR.OFFLINE]: "Couldn't reach DeepSeek.",
+        [ERR.OFFLINE]: `Couldn't reach ${entry.name}.`,
         [ERR.TIMEOUT]: 'The test timed out.'
       };
       flash(status, messages[res?.error] || res?.error || 'Test failed.', 'bad');
@@ -682,7 +817,7 @@ function renderSites() {
   wireHistory();
   renderSites();
   wireCache();
-  await wireApiKey();
+  await wireService();
 
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'sync' || !changes.settings) return;

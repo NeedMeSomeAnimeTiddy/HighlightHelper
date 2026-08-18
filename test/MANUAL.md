@@ -123,7 +123,7 @@ broken it shows up here.*
 5. Close the console and scroll down the settings page. Count the section headings.
 
    ✅ **Should see:** ten sections, in this order —
-   Preferences, Where AI runs, DeepSeek API key, Tools, My tools, Recent answers, Highlights,
+   Preferences, Where AI runs, Which service, Tools, My tools, Recent answers, Highlights,
    Search with…, Cache, Sites
 
 6. Look at the **Tools** section
@@ -180,15 +180,15 @@ machine can't, the correct result is a clear message saying so** — that is a p
 
    ✅ **Should see:** the grey explanation text underneath changes each time
 
-3. Leave it on the first option (*On-device when possible, DeepSeek otherwise*)
+3. Leave it on the first option (*On-device when possible, the service below otherwise*)
 4. Reload the page
 
    ✅ **Should see:** your choice was remembered
 
-### 2c. The DeepSeek key
+### 2c. Picking a service and its key
 
-*Skip this if you are only testing the local model — but then the "falls back to DeepSeek"
-checks later will correctly fail.*
+*Skip this if you are only testing the local model — but then the "falls back to the hosted
+service" checks later will correctly fail.*
 
 1. First, with **no** key saved, go to your article tab
 2. Select a whole paragraph, click the small icon that appears, and click **Summarise**
@@ -197,18 +197,45 @@ checks later will correctly fail.*
    settings** button
    ❌ **If you see a raw error code** like `NO_KEY`: tell me.
 
-3. Now go to the settings page, find **DeepSeek API key**
-4. Paste your key into the box
-5. Click **Save key**
-6. Click **Test key**
+3. Now go to the settings page, find **Which service**
+4. Choose the service you have a key for. The grey line under the picker should change, and
+   the **Model** box should show that service's default as its placeholder
+5. Paste your key into the box
+6. Click **Save**
 
-   ✅ **Should see:** *Works — responded as deepseek-chat*
-   ❌ **Anything else:** send me exactly what it says.
+   ✅ **Should see:** for any service other than DeepSeek, Chrome asks permission to access
+   that provider's site. Accept it.
+   ❌ **If you decline:** the status says the service needs permission, and nothing is saved.
+   That is correct — try again and accept.
 
-7. Click the Highlight Helper toolbar icon
+7. Click **Test**
+
+   ✅ **Should see:** *Works — responded as …* naming a model
+   ❌ **Anything else:** send me exactly what it says. *"…rejected that key"* should name the
+   service you actually chose — if it says DeepSeek while you picked OpenAI, that's a bug.
+
+8. Click the Highlight Helper toolbar icon
 
    ✅ **Should see:** a line at the bottom of the little popup saying either *On-device model
-   ready — nothing leaves this machine* or *DeepSeek key saved. All tools available.*
+   ready — nothing leaves this machine* or *<service> key saved. All tools available.*
+
+### 2d. Switching service without losing the first key
+
+*Only if you have keys for two services. This is the one thing most likely to be wrong.*
+
+1. With the first service saved and working, switch the picker to a second service
+
+   ✅ **Should see:** the key box empties, and the model box empties too
+   ❌ **If the first key is still shown:** tell me — saving would overwrite it under the
+   wrong service.
+
+2. Save a key for the second service, then switch **back** to the first
+
+   ✅ **Should see:** the first key is still there, and *A key is saved for this service*
+3. Select a paragraph and summarise it
+
+   ✅ **Should see:** an answer, not a cached copy of the other service's one — ask something
+   with a distinctive answer if you want to be sure.
 
 ---
 

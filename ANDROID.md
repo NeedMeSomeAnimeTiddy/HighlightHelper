@@ -345,7 +345,25 @@ with a different first rung, and `api.ai()` is still the single choke point
 | --- | --- | --- | --- |
 | On-device | **ML Kit GenAI** (Gemini Nano via AICore) | Summarize, rewrite, proofread, prompt | Pixel 8+, Galaxy S24+, some MediaTek/Snapdragon flagships. Not most phones |
 | On-device, wider | MediaPipe LLM Inference + a Gemma model | Everything | 1–3 GB download. A big ask for a utility app |
-| Cloud | **DeepSeek**, unchanged | Everything | Needs the user's key, as today |
+| Cloud | **Whichever service the user picked** | Everything | Needs the user's key, as today |
+
+**Which cloud service is decided in the engine, not in Kotlin.** The registry is
+[`src/common/providers.js`](src/common/providers.js), the same table the extension reads, and
+`resolveProvider()` runs inside the WebView; every `ai`/`chat` message carries the result as a
+`provider` object — id, name, wire format, endpoint, model. `AiService` reads that and adds
+two things the engine must never hold: a socket and the key. So adding a provider is one edit
+to one JS file and it appears in both settings screens, and there is no Kotlin copy of an
+endpoint that can drift out of step with the one the engine resolved.
+
+Two wire formats exist, not one: almost everything speaks OpenAI's `/chat/completions`, and
+Anthropic's Messages API differs structurally — system prompt hoisted out of the message list,
+`max_tokens` required, typed stream events. Both are implemented twice on purpose, once in
+`providers.js` for the browser and once in `AiService.kt` for OkHttp, and
+`android/tools/bridge-smoke.mjs` checks the engine still sends what Kotlin expects.
+
+Keys are one per provider in `SecureStore` (`api_key_<id>`), so trying a second service does
+not destroy the first one's key. The pre-registry `deepseek_api_key` entry is folded in on
+read rather than migrated at startup — a migration that throws has no second chance.
 
 The honest consequence: the desktop promise — *pin it to local and your text never leaves the
 machine* — holds on Android only on supported devices and only for the actions ML Kit covers.
@@ -467,9 +485,10 @@ What is missing, in the order it will be noticed:
   the document it came from, and an intent carries a string with no document. A clippings
   library — save the quote with whatever provenance the intent carries — is the honest
   substitute and is not built.
-- **No on-device model.** Every AI call goes to DeepSeek, so the desktop promise that a
-  selection can stay on the machine has no equivalent here yet. ML Kit GenAI is the
-  route; see the provider table above.
+- **No on-device model.** Every AI call goes to a hosted service, so the desktop promise
+  that a selection can stay on the machine has no equivalent here yet — a local Ollama on
+  the same network is the closest available substitute, and it still leaves the phone. ML
+  Kit GenAI is the real route; see the provider table above.
 - **Highlighting** aside, the only thing the phone cannot do that the panel can is paint
   on a page. Everything else in the tool table above is built.
 

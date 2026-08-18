@@ -15,6 +15,7 @@
 
 import { getSettings, onSettingsChanged, isEnabledFor } from '../common/settings.js';
 import { MSG, ERR, PROVIDER, PORT } from '../common/constants.js';
+import { resolveProvider } from '../common/providers.js';
 import { TOOL_HINTS, toolFamily, detectorForTool } from '../common/tools.js';
 import { detect, getDetector } from './detectors/index.js';
 import { el, menu, glyph, errorBox, note, openRow } from './kit.js';
@@ -424,23 +425,34 @@ function openOptions() {
   send({ type: MSG.OPEN_OPTIONS }).catch(() => {});
 }
 
-const FRIENDLY = {
-  [ERR.NO_KEY]:
-    'This needs an AI provider. Either turn on the on-device model or add a ' +
-    'DeepSeek API key — both are in settings.',
-  [ERR.NO_LOCAL_MODEL]:
-    'Answers are set to stay on this machine, and the on-device model can\'t ' +
-    "handle this one — it may be too long, or the model isn't installed. " +
-    'Settings can allow DeepSeek as a fallback.',
-  [ERR.BAD_KEY]: 'DeepSeek rejected that API key. Check it in settings.',
-  [ERR.NO_FUNDS]: 'Your DeepSeek account is out of credit.',
-  [ERR.RATE_LIMIT]: 'DeepSeek is rate-limiting right now. Try again in a moment.',
-  [ERR.OFFLINE]: "Couldn't reach DeepSeek. Check your connection.",
-  [ERR.TIMEOUT]: 'That request timed out.',
-  [ERR.STALE_WORKER]:
-    'This tool is newer than the running background script. Open chrome://extensions ' +
-    'and press reload on Highlight Helper.'
-};
+/**
+ * The sentinel codes, in words, naming whichever service is actually selected.
+ *
+ * A function rather than a table because the provider is a setting now, and
+ * "DeepSeek rejected that API key" is actively misleading when the key was
+ * pasted into OpenAI — it sends someone to check the wrong dashboard.
+ */
+function friendly(code) {
+  const name = resolveProvider(settings || {}).name;
+  const table = {
+    [ERR.NO_KEY]:
+      'This needs an AI provider. Either turn on the on-device model or add a ' +
+      `${name} API key — both are in settings.`,
+    [ERR.NO_LOCAL_MODEL]:
+      'Answers are set to stay on this machine, and the on-device model can\'t ' +
+      "handle this one — it may be too long, or the model isn't installed. " +
+      `Settings can allow ${name} as a fallback.`,
+    [ERR.BAD_KEY]: `${name} rejected that API key. Check it in settings.`,
+    [ERR.NO_FUNDS]: `Your ${name} account is out of credit.`,
+    [ERR.RATE_LIMIT]: `${name} is rate-limiting right now. Try again in a moment.`,
+    [ERR.OFFLINE]: `Couldn't reach ${name}. Check your connection.`,
+    [ERR.TIMEOUT]: 'That request timed out.',
+    [ERR.STALE_WORKER]:
+      'This tool is newer than the running background script. Open chrome://extensions ' +
+      'and press reload on Highlight Helper.'
+  };
+  return table[code] || '';
+}
 
 function errorFor(err, retry) {
   const code = String(err?.message || err);
@@ -449,7 +461,7 @@ function errorFor(err, retry) {
     code === ERR.NO_KEY || code === ERR.BAD_KEY || code === ERR.NO_LOCAL_MODEL;
   // Retrying a stale worker just repeats the same failure.
   const canRetry = !needsKey && code !== ERR.STALE_WORKER;
-  return errorBox(FRIENDLY[code] || code, {
+  return errorBox(friendly(code) || code, {
     onRetry: canRetry ? retry : null,
     onSettings: needsKey ? openOptions : null
   });

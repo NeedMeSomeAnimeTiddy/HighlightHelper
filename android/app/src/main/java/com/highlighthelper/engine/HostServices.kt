@@ -34,14 +34,14 @@ import kotlinx.serialization.json.put
  *
  * Network deliberately lives on this side rather than in the WebView. Not only
  * because a page has no `host_permissions` escape from CORS, but because the
- * DeepSeek key belongs in the Android keystore and should never enter the JS
- * heap at all.
+ * API key belongs in the Android keystore and should never enter the JS heap at
+ * all. The engine says which service to call and never learns its credential.
  */
 class HostServices(
     private val context: Context,
     val scope: CoroutineScope,
     private val rates: RatesService,
-    private val deepSeek: DeepSeekService,
+    private val ai: AiService,
     private val http: HttpService,
     private val cache: ResponseCache,
     private val store: KeyValueStore,
@@ -135,8 +135,14 @@ class HostServices(
                  * already complete, and dribbling it back a token at a time to
                  * look busy would be theatre.
                  */
+                val provider = message["provider"] as? JsonObject
                 val key = ResponseCache.keyFor(
-                    message.str("model"),
+                    // Both, not just the model: two providers can be asked for
+                    // the same model id, and an empty model means "whichever
+                    // this service defaults to" — so the id is what actually
+                    // distinguishes the two answers.
+                    provider?.str("id"),
+                    provider?.str("model"),
                     message.str("system"),
                     message.str("user"),
                     message["messages"]?.toString()
@@ -156,7 +162,7 @@ class HostServices(
                     val onChunk: ((String) -> Unit)? =
                         if (streaming) ({ soFar -> _streaming.value = soFar }) else null
 
-                    deepSeek.complete(message, onChunk)
+                    ai.complete(message, onChunk)
                         .also { result ->
                             if (streaming) _streaming.value = null
                             result.str("text")?.takeIf { it.isNotBlank() }

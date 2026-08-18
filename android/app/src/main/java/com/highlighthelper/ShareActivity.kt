@@ -38,7 +38,7 @@ class ShareActivity : ComponentActivity() {
             context = this,
             scope = lifecycleScope,
             rates = app.rates,
-            deepSeek = app.deepSeek,
+            ai = app.ai,
             http = app.http,
             cache = app.cache,
             store = app.store,

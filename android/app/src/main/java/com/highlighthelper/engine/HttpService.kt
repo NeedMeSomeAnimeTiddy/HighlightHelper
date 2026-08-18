@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
  *
  * Deliberately dumb: a URL in, a status and a body out. No headers the caller
  * did not ask for, and above all no credentials — the only credential this app
- * holds is the DeepSeek key, and that is attached in DeepSeekService, to one
+ * holds is the DeepSeek key, and that is attached in AiService, to one
  * endpoint, and never reaches the engine at all.
  */
 class HttpService {

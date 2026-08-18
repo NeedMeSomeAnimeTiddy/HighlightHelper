@@ -37,6 +37,15 @@ import { CONTEXT_TOOLS, TOOL_HINTS, toolFamily, detectorForTool } from '../src/c
 import { AI, ERR } from '../src/common/constants.js';
 import { parseTopics } from '../src/common/text.js';
 import { buildPrompt, cleanOutput, fillTemplate } from '../src/common/prompts.js';
+import {
+  PROVIDERS,
+  resolveProvider,
+  buildBody,
+  readAnswer,
+  readDelta,
+  describeHttpError,
+  originFor
+} from '../src/common/providers.js';
 import { runLocal, isSupported as localSupported, bulletsToPanelStyle }
   from '../src/content/local-ai.js';
 import { provenance, parseMarkup } from '../src/content/kit.js';
@@ -1071,6 +1080,103 @@ check('fences and wrapping quotes are stripped', [
   cleanOutput('"A service-level agreement."'),
   cleanOutput('He said "hello" to her.')
 ], ['const a = 1;', 'A service-level agreement.', 'He said "hello" to her.']);
+
+/* ---------- which service answers ---------- */
+
+/*
+ * The registry is data, and data that is wrong fails quietly: a typo'd endpoint
+ * is a network error the user reads as "my key is bad". So the shape is checked
+ * rather than trusted.
+ */
+check('every provider is reachable and nameable', PROVIDERS.every((p) =>
+  p.id && p.name && (p.endpoint || p.editableEndpoint) &&
+  (p.defaultModel || p.editableEndpoint)
+), true);
+check('every fixed endpoint is an absolute chat URL', PROVIDERS
+  .filter((p) => p.endpoint)
+  .every((p) => /^https?:\/\/.+\/(chat\/completions|messages)$/.test(p.endpoint)), true);
+check('ids are unique', new Set(PROVIDERS.map((p) => p.id)).size, PROVIDERS.length);
+
+// An unset model must resolve to the provider's own default rather than to '',
+// which is what makes switching service safe.
+check('an unset model becomes the service default',
+  resolveProvider({ aiService: 'openai' }).model, 'gpt-4o-mini');
+check('a set model wins',
+  resolveProvider({ aiService: 'openai', model: 'gpt-4.1' }).model, 'gpt-4.1');
+check('an unknown service falls back rather than throwing',
+  resolveProvider({ aiService: 'nonsense' }).id, 'deepseek');
+// Only the providers that say so may have their endpoint overridden: a stray
+// `aiEndpoint` left over from a custom provider must not redirect OpenAI.
+check('a stray endpoint cannot redirect a fixed provider',
+  resolveProvider({ aiService: 'openai', aiEndpoint: 'https://evil.example/v1/chat/completions' })
+    .endpoint,
+  'https://api.openai.com/v1/chat/completions');
+check('and is honoured where the provider allows it',
+  resolveProvider({ aiService: 'custom', aiEndpoint: 'http://127.0.0.1:8080/v1/chat/completions' })
+    .endpoint,
+  'http://127.0.0.1:8080/v1/chat/completions');
+
+// The two wire formats. Anthropic hoists the system prompt out of the message
+// list and requires max_tokens; getting either wrong is a 400 on every call.
+const openaiBody = buildBody({
+  api: 'openai',
+  model: 'm',
+  messages: [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }],
+  temperature: 0.2,
+  maxTokens: 100
+});
+const anthropicBody = buildBody({
+  api: 'anthropic',
+  model: 'm',
+  messages: [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }],
+  temperature: 0.2,
+  maxTokens: 100
+});
+check('the OpenAI shape keeps the system message in the list',
+  [openaiBody.messages.length, openaiBody.max_tokens, 'system' in openaiBody],
+  [2, 100, false]);
+check('the Anthropic shape hoists it out',
+  [anthropicBody.system, anthropicBody.messages.length, anthropicBody.max_tokens],
+  ['S', 1, 100]);
+check('and always sends a token ceiling, because the API requires one',
+  buildBody({ api: 'anthropic', model: 'm', messages: [{ role: 'user', content: 'U' }] })
+    .max_tokens,
+  1024);
+
+check('answers are read out of both shapes', [
+  readAnswer('openai', { choices: [{ message: { content: 'one' } }] }),
+  readAnswer('anthropic', { content: [{ type: 'text', text: 'two' }] })
+], ['one', 'two']);
+
+check('stream deltas are read out of both shapes', [
+  readDelta('openai', JSON.stringify({ choices: [{ delta: { content: 'a' } }] })),
+  readDelta('anthropic', JSON.stringify({
+    type: 'content_block_delta', delta: { type: 'text_delta', text: 'b' }
+  })),
+  // The events that carry no text at all — far more numerous than the ones
+  // that do, and each one must add nothing rather than "undefined".
+  readDelta('anthropic', JSON.stringify({ type: 'message_start' })),
+  readDelta('openai', 'not json at all')
+], ['a', 'b', '', '']);
+
+// The key is which account to go and fix, so "no credit" must not be reported
+// as "bad key". Anthropic says 400 for it; OpenAI says 429 with a body.
+check('billing failures are told apart from bad keys', [
+  describeHttpError('openai', 401, {}),
+  describeHttpError('openai', 429, { error: { message: 'You exceeded your quota' } }),
+  describeHttpError('openai', 429, { error: { message: 'Too many requests' } }),
+  describeHttpError('anthropic', 400, { error: { message: 'Your credit balance is too low' } }),
+  describeHttpError('deepseek', 402, {})
+], [ERR.BAD_KEY, ERR.NO_FUNDS, ERR.RATE_LIMIT, ERR.NO_FUNDS, ERR.NO_FUNDS]);
+check('an unrecognised failure names the service rather than swallowing it',
+  describeHttpError('openai', 503, { error: { message: 'Overloaded' } }, 'OpenAI'),
+  'OpenAI returned 503: Overloaded');
+
+check('origins are derived for the permission request', [
+  originFor('https://api.openai.com/v1/chat/completions'),
+  originFor('http://localhost:11434/v1/chat/completions'),
+  originFor('')
+], ['https://api.openai.com/*', 'http://localhost:11434/*', '']);
 
 /* ---------- report ---------- */
 

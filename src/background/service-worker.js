@@ -1,7 +1,7 @@
 /**
  * Background service worker.
  *
- * Owns everything that touches the network or a secret: DeepSeek calls,
+ * Owns everything that touches the network or a secret: model calls,
  * exchange rates, the response cache, and the "Translate to…" context menu.
  * Content scripts only ever send messages here.
  */
@@ -12,8 +12,9 @@ import { CONTEXT_MENU_LANGUAGES, languageName } from '../common/languages.js';
 import { CONTEXT_TOOLS } from '../common/tools.js';
 import { cacheGet, cacheSet, cacheClear, cacheStats } from '../common/cache.js';
 import { cacheKey, hash } from '../common/hash.js';
+import { resolveProvider } from '../common/providers.js';
 import { getRates, clearRates } from './rates.js';
-import { runAi, runAiStream, runChat, testApiKey } from './deepseek.js';
+import { runAi, runAiStream, runChat, testApiKey } from './ai.js';
 import { readHistory, remember as rememberRaw, clearHistory } from '../common/history.js';
 import { lookup, searchLinks, wikiLang } from './wikipedia.js';
 import { define, synonyms, dictionaryLinks, wiktLang } from './dictionary.js';
@@ -251,8 +252,13 @@ async function handleAi({ action, text, options = {} }, onChunk = null) {
   // call with a different target language would be served the first result.
   const usesLanguage = action === AI.TRANSLATE || action === AI.EXPLAIN;
   const usesCodeHint = action === AI.EXPLAIN_CODE || action === AI.COMMENT_CODE;
+  // Resolved rather than read raw: `settings.model` is empty when the provider's
+  // own default is in use, so two providers would otherwise share one cache
+  // entry and the second one asked would be served the first one's answer.
+  const chosen = resolveProvider(settings, options);
   const keyOpts = {
-    model: options.model || settings.model,
+    provider: chosen.id,
+    model: chosen.model,
     ...(usesLanguage ? { language: options.language || settings.language } : {}),
     ...(usesCodeHint ? { codeLanguage: options.language || '' } : {}),
     // A custom tool's answer depends entirely on its prompt, so two tools
@@ -359,7 +365,14 @@ async function handle(msg) {
     }
 
     case MSG.TEST_KEY:
-      return testApiKey(msg.key);
+      // The provider travels with the request: the options page tests what is
+      // in the form, which may be a service the user has selected but not yet
+      // saved.
+      return testApiKey(msg.key, {
+        providerId: msg.providerId,
+        endpoint: msg.endpoint,
+        model: msg.model
+      });
 
     case MSG.CLEAR_CACHE: {
       const responses = await cacheClear();

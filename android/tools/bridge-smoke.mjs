@@ -363,6 +363,66 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
     info.registry.length, 22);
   check('and the pickers get their lists',
     [info.languages.length > 5, info.currencies.length > 20], [true, true]);
+
+  // The settings screen builds its service picker from this, and Kotlin holds
+  // no endpoints of its own — so an empty or malformed list here is a settings
+  // screen with nothing to choose from.
+  const deepseek = info.providers.find((p) => p.id === 'deepseek');
+  const openai = info.providers.find((p) => p.id === 'openai');
+  check('the provider registry crosses the bridge',
+    [info.providers.length > 5, deepseek.name, openai.name],
+    [true, 'DeepSeek', 'OpenAI']);
+  check('each provider carries what the picker needs',
+    [typeof openai.defaultModel, openai.models.length > 0, openai.needsKey],
+    ['string', true, true]);
+  check('a provider whose endpoint is typed says so',
+    info.providers.find((p) => p.id === 'custom').editableEndpoint, true);
+}
+
+/*
+ * Which service to call, decided in the engine and sent with the request.
+ *
+ * This is the whole reason Kotlin can stay a transport: it reads `provider` off
+ * each message rather than keeping its own table of endpoints. If this stops
+ * being sent, `AiService` silently falls back to DeepSeek — which would look
+ * like a working app right up until someone with only an OpenAI key uses it.
+ */
+{
+  const { session } = await call('detect', {
+    text: 'The committee met on Tuesday to review the quarterly figures. '.repeat(6),
+    settings: { aiService: 'anthropic' }
+  });
+
+  hostCalls.length = 0;
+  const view = await call('openRow', { session, key: 'summarize' });
+  await call('runView', { session, view: view.view });
+
+  const ai = hostCalls.find((c) => c.type === 'ai');
+  check('the request names the chosen service',
+    [ai.provider.id, ai.provider.api], ['anthropic', 'anthropic']);
+  check('with the endpoint resolved from the registry',
+    ai.provider.endpoint, 'https://api.anthropic.com/v1/messages');
+  check("and that service's default model, not the last one used",
+    ai.provider.model, 'claude-haiku-4-5');
+}
+
+{
+  // An explicitly chosen model must survive; an unset one must not become the
+  // literal empty string, or every provider gets asked for a model called "".
+  const { session } = await call('detect', {
+    text: 'The committee met on Tuesday to review the quarterly figures. '.repeat(6),
+    settings: { aiService: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct' }
+  });
+
+  hostCalls.length = 0;
+  const view = await call('openRow', { session, key: 'summarize' });
+  await call('runView', { session, view: view.view });
+
+  const ai = hostCalls.find((c) => c.type === 'ai');
+  check('a chosen model overrides the default',
+    ai.provider.model, 'meta-llama/llama-3.3-70b-instruct');
+  check('and the key never crosses into the engine',
+    ['apiKey' in ai, 'key' in ai], [false, false]);
 }
 
 /*

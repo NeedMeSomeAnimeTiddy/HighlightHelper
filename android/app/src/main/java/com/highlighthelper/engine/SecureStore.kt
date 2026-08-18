@@ -6,7 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 /**
- * The DeepSeek API key, and nothing else.
+ * The API keys, and nothing else.
  *
  * The extension keeps it in `chrome.storage.local` — never in sync storage,
  * never in the source. The equivalent promise on a phone is the keystore: the
@@ -45,13 +45,37 @@ class SecureStore(context: Context) {
         )
     }
 
-    var apiKey: String
-        get() = prefs.getString(KEY, "").orEmpty().trim()
-        set(value) = prefs.edit().putString(KEY, value.trim()).apply()
+    /**
+     * One key per provider.
+     *
+     * Kept separately rather than overwritten, because trying OpenAI for an
+     * afternoon and going back to DeepSeek should not mean finding the first
+     * key again — and a key nobody can find is a key that ends up pasted into a
+     * notes app.
+     */
+    fun keyFor(providerId: String): String =
+        prefs.getString(entry(providerId), "").orEmpty().trim().ifEmpty {
+            // The pre-registry single key, read as DeepSeek's. Folded in on read
+            // rather than migrated once at startup: a migration that throws has
+            // no second chance, and this cannot be missed.
+            if (providerId == "deepseek") prefs.getString(LEGACY_KEY, "").orEmpty().trim() else ""
+        }
 
-    val hasKey: Boolean get() = apiKey.isNotEmpty()
+    fun setKey(providerId: String, value: String) {
+        prefs.edit().apply {
+            val trimmed = value.trim()
+            if (trimmed.isEmpty()) remove(entry(providerId)) else putString(entry(providerId), trimmed)
+            // Once the value has a home under the new name, the old entry goes:
+            // one credential should not sit in two places on disk.
+            if (providerId == "deepseek") remove(LEGACY_KEY)
+        }.apply()
+    }
+
+    fun hasKeyFor(providerId: String): Boolean = keyFor(providerId).isNotEmpty()
+
+    private fun entry(providerId: String) = "api_key_$providerId"
 
     private companion object {
-        const val KEY = "deepseek_api_key"
+        const val LEGACY_KEY = "deepseek_api_key"
     }
 }

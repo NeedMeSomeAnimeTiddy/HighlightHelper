@@ -60,9 +60,9 @@
       <div class="field">
         <label for="aiProvider">Answer with</label>
         <select id="aiProvider">
-          <option value="auto">On-device when possible, DeepSeek otherwise</option>
+          <option value="auto">On-device when possible, the service below otherwise</option>
           <option value="local">On-device only — never send my text anywhere</option>
-          <option value="cloud">DeepSeek only</option>
+          <option value="cloud">The service below only</option>
         </select>
         <p class="hint" id="providerHint"></p>
       </div>
@@ -82,29 +82,60 @@
     </section>
 
     <section class="card">
-      <h2>DeepSeek API key</h2>
+      <h2>Which service</h2>
       <p class="hint">
         Needed for the explain, translate, and rewrite tools whenever the on-device model
-        isn't handling them. Currency and unit conversion work without it.
-        Get one at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer noopener">platform.deepseek.com</a>.
-        The key is stored in this browser's local extension storage only — it is never synced to your Google account and never committed to the source.
+        isn't handling them. Currency and unit conversion work without any of this.
+        Each service keeps its own key, so switching back later doesn't mean pasting one again.
+        Keys are stored in this browser's local extension storage only — never synced to your
+        Google account, never committed to the source.
       </p>
 
       <div class="field">
+        <label for="aiService">Service</label>
+        <select id="aiService"></select>
+        <p class="hint" id="serviceNote"></p>
+      </div>
+
+      <div class="field" id="endpointField" hidden>
+        <label for="aiEndpoint">Endpoint</label>
+        <input id="aiEndpoint" type="url" spellcheck="false" autocomplete="off"
+               placeholder="http://localhost:1234/v1/chat/completions">
+        <p class="hint">The full chat-completions URL, not just the host.</p>
+      </div>
+
+      <div class="field">
+        <label for="model">Model</label>
+        <input id="model" type="text" spellcheck="false" autocomplete="off" list="modelSuggestions">
+        <datalist id="modelSuggestions"></datalist>
+        <p class="hint">
+          Leave blank for the service's default. The list is only a set of suggestions — any
+          model id the service accepts will do.
+        </p>
+      </div>
+
+      <div class="field" id="keyField">
         <label for="apiKey">API key</label>
         <div class="row">
-          <input id="apiKey" type="password" spellcheck="false" autocomplete="off"
-                 placeholder="sk-…">
+          <input id="apiKey" type="password" spellcheck="false" autocomplete="off">
           <button id="toggleKey" type="button" class="ghost">Show</button>
         </div>
+        <p class="hint" id="keyHint"></p>
       </div>
 
       <div class="row">
-        <button id="saveKey" type="button" class="primary">Save key</button>
-        <button id="testKey" type="button">Test key</button>
+        <button id="saveKey" type="button" class="primary">Save</button>
+        <button id="testKey" type="button">Test</button>
         <button id="clearKey" type="button" class="ghost">Remove key</button>
         <span id="keyStatus" class="status" role="status"></span>
       </div>
+
+      <p class="hint">
+        Signing in with a ChatGPT or Claude.ai subscription is not one of the options, and
+        can't be: neither company offers a way for an app like this to spend a chat
+        subscription. The keys above are billed separately, per request, on the provider's own
+        account.
+      </p>
     </section>
 
     <section class="card">

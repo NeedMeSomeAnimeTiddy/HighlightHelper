@@ -53,10 +53,12 @@ off individually in settings.
 
 The other five need a model, and there are two ways to get one. Chrome can run
 **Gemini Nano on your machine** — no key, no cost, and the selection never leaves
-the computer — and there is **DeepSeek** for when it can't. Out of the box the
-extension uses the on-device model where it can and falls back, so the "Yes"
-column above means *"asks a model"*, not *"sends your text to a company"*. See
-[Where AI runs](#where-ai-runs).
+the computer — and there is **a hosted service of your choosing** for when it
+can't: DeepSeek, OpenAI, Anthropic, OpenRouter, Gemini, Groq, Mistral, xAI,
+Together, a local Ollama, or anything else that speaks the OpenAI chat API. Out
+of the box the extension uses the on-device model where it can and falls back,
+so the "Yes" column above means *"asks a model"*, not *"sends your text to a
+company"*. See [Where AI runs](#where-ai-runs).
 
 *Continue writing* is the one rewrite tone that appends rather than replaces, so
 its result shows the whole passage with the original dimmed and the new text in
@@ -111,9 +113,13 @@ settings:
 
 | | |
 | --- | --- |
-| **On-device when possible, DeepSeek otherwise** | The default. Anything Chrome's built-in model can handle stays on this machine; everything else goes to DeepSeek |
-| **On-device only** | Nothing is ever sent to DeepSeek. Tools the local model can't serve say so instead of falling back |
-| **DeepSeek only** | Every AI tool goes to DeepSeek |
+| **On-device when possible, the service below otherwise** | The default. Anything Chrome's built-in model can handle stays on this machine; everything else goes to the hosted service |
+| **On-device only** | Nothing is ever sent to a hosted service. Tools the local model can't serve say so instead of falling back |
+| **The service below only** | Every AI tool goes to the hosted service |
+
+That is *where* an answer comes from. **Which** hosted service is a separate
+setting in the card below it, because "keep my text on this machine" and "I have
+an OpenAI key rather than a DeepSeek one" are unrelated questions.
 
 ### The on-device model
 
@@ -136,21 +142,49 @@ treated exactly like unavailable, and the options page offers the download expli
 deliberately unused — they are still origin-trial and simply absent from a normal browser.
 Those tones go through `LanguageModel` with the same prompt DeepSeek gets.
 
-### Add your DeepSeek API key
+### Pick a service and add a key
 
 Needed unless you are running on-device only.
 
-1. Get a key from [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)
-2. Open the extension's options page — either:
+1. Open the extension's options page — either:
    - click the Highlight Helper toolbar icon, then **Settings…**, or
    - go to `chrome://extensions`, find Highlight Helper, click **Details** → **Extension options**
-3. Paste the key into the **DeepSeek API key** field under the *DeepSeek API key* heading
-4. Click **Save key**, then **Test key** to confirm it works
+2. In the **Which service** card, choose one. **Get a key** links straight to that
+   provider's key page
+3. Paste the key, optionally set a model, and click **Save**, then **Test**
 
-**Where the key lives:** `chrome.storage.local`, on this machine only. It is deliberately
-*not* in `chrome.storage.sync`, so it never travels to your Google account, and it is never
-written to any file in this repo. Only the background service worker ever reads it —
-content scripts ask the worker to make calls and never see the key themselves.
+The services are listed in [`src/common/providers.js`](src/common/providers.js) —
+one table, read by the extension and the Android app alike:
+
+| | |
+| --- | --- |
+| **DeepSeek** | Cheapest of the hosted options by some margin. The default |
+| **OpenAI**, **Anthropic**, **Google Gemini**, **xAI**, **Mistral**, **Groq**, **Together** | Their own keys, their own billing |
+| **OpenRouter** | One key, most models, including free ones |
+| **Ollama** | On your own machine. No key and no bill, though the selection still leaves the browser for the local server |
+| **Anything else** | Paste a chat-completions URL. LM Studio, vLLM, llama.cpp, a company gateway |
+
+Model ids are free text with suggestions, not a fixed menu — they change faster
+than any extension ships. Leaving the field blank uses the service's own default,
+which is also what makes switching service safe: a `deepseek-chat` left pointed
+at OpenAI would 404 in a way that reads like a broken extension.
+
+**No "Sign in with ChatGPT".** Neither OpenAI nor Anthropic offers a way for a
+third-party app to spend a ChatGPT or Claude.ai *subscription*; the community
+projects that appear to do it work by reusing OpenAI's own first-party client
+credentials, which is against their terms and risks the user's account. The keys
+above are API keys, billed per request on a separate balance.
+
+**Where keys live:** `chrome.storage.local`, on this machine only, one per
+service so switching back doesn't mean finding a key again. Deliberately *not*
+in `chrome.storage.sync`, so they never travel to your Google account, and never
+written to any file in this repo. Only the background service worker reads them —
+content scripts ask the worker to make calls and never see a key themselves.
+
+**Permissions:** only DeepSeek's host is requested at install. Every other
+service is an *optional* host permission, asked for at the moment you pick it —
+an extension that declares nine AI companies up front looks like it talks to
+nine AI companies.
 
 ## Nothing happens on a page
 
@@ -212,9 +246,11 @@ nothing, that's where a delivery failure would be reported.
 
 ## Settings
 
-Everything below lives in `chrome.storage.sync` except the API key.
+Everything below lives in `chrome.storage.sync` except the API keys.
 
-- **Where AI runs** — on-device, DeepSeek, or on-device first with DeepSeek behind it
+- **Where AI runs** — on-device, hosted, or on-device first with hosted behind it
+- **Which service** — DeepSeek, OpenAI, Anthropic, OpenRouter, Gemini, Groq, Mistral,
+  xAI, Together, a local Ollama, or any OpenAI-compatible endpoint, plus the model id
 - **Convert currencies into** — the target for currency conversion
 - **Preferred unit system** — metric or imperial. If a measurement is already in your system,
   it converts the other way, so the answer is always the number you don't already have
