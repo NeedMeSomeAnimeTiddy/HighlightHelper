@@ -36,6 +36,20 @@ the top level, so Studio finds no Gradle project there and the Run button stays 
 To run it you need an emulator image or a physical device. Android Studio's Device Manager
 will fetch a system image, or a connected phone works with `./gradlew :app:installDebug`.
 
+### Releasing
+
+`assembleRelease` shrinks with R8 and signs from `android/keystore.properties`, which is
+gitignored — absent, the build still runs and comes out unsigned, so a clone is never broken
+by a key it cannot have. The published v0.1.0 APK is signed with Android's standard debug key,
+which is fine for sideloading and is why there is no Play Store listing.
+
+Two R8 rules in `app/proguard-rules.pro` are load-bearing and both fail *silently*, in release
+only: `@JavascriptInterface` methods are called from `bridge.js` and by nothing in Kotlin, so
+without a keep rule R8 removes them and every request hangs with no error; and the serialized
+models are filled from JSON whose keys live in `bridge.js`, so renamed fields read as absent
+rather than throwing. After changing either, check `mapping.txt` — `ready`, `failed`, `settle`
+and `request` must still map to themselves.
+
 ### Tests
 
 ```bash
