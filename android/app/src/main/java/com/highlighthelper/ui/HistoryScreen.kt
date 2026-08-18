@@ -60,6 +60,14 @@ import java.time.temporal.ChronoUnit
  */
 private data class HistoryEntry(
     val action: String,
+    /**
+     * What to call this, when the action id cannot say.
+     *
+     * Every tool someone writes reports the same action, so without this a
+     * history of five custom tools is five rows all labelled "My tools". The
+     * record carries the tool's own name when there is one.
+     */
+    val label: String,
     val source: String,
     val answer: String,
     val at: Long
@@ -101,6 +109,7 @@ private suspend fun loadHistory(engine: DetectorEngine): HistoryPage {
         if (source.isBlank() || answer.isBlank()) return@mapNotNull null
         HistoryEntry(
             action = row["action"].asString().orEmpty(),
+            label = row["label"].asString().orEmpty(),
             source = source,
             answer = answer,
             at = (row["at"] as? JsonPrimitive)?.longOrNull ?: 0L
@@ -342,7 +351,10 @@ private fun HistoryScreen(app: HighlightHelperApp, onBack: () -> Unit) {
                 else -> items(page.entries) { entry ->
                     HistoryItem(
                         entry = entry,
-                        label = page.labels[entry.action] ?: entry.action,
+                        // The record's own label wins: only it can tell one
+                        // user-written tool from another, since they all report
+                        // the same action id.
+                        label = entry.label.ifBlank { page.labels[entry.action] ?: entry.action },
                         ago = relativeTime(entry.at, page.readAt)
                     )
                     HorizontalDivider()

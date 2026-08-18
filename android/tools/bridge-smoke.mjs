@@ -574,6 +574,58 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
     ai.system.includes('{lang}'), false);
 }
 
+/*
+ * A history that can tell one of your own tools from another.
+ *
+ * Every user-written tool sends the same action id, so without the label the
+ * record carries, five tools are five rows all reading "My tools". The label
+ * also takes part in de-duplication: two different tools over the same
+ * sentence are two different answers however alike their action ids are.
+ */
+{
+  await call('clearHistory');
+  const tools = [
+    { id: 't1', name: 'Explain simply', prompt: 'Explain simply.' },
+    { id: 't2', name: 'Into Spanish', prompt: 'Translate to Spanish.' }
+  ];
+  const text = 'The committee reviewed the quarterly figures and found them consistent.';
+  const { session } = await call('detect', { text, settings: { customTools: tools } });
+
+  // Two or more tools collapse into one "My tools" row, so the children only
+  // become reachable once the parent submenu has been opened — same as the
+  // sheet, which is why openRow on a child before its parent is an error.
+  await call('openRow', { session, key: 'custom' });
+
+  for (const key of ['custom:t1', 'custom:t2']) {
+    const view = await call('openRow', { session, key });
+    await call('runView', { session, view: view.view });
+  }
+
+  const entries = await call('history');
+  check('two tools over one sentence are two entries', entries.length, 2);
+  check('each remembered under its own name',
+    entries.map((h) => h.label).sort(), ['Explain simply', 'Into Spanish']);
+  await call('clearHistory');
+}
+
+/*
+ * A clipped record says it was clipped. An entry that ends mid-sentence with
+ * nothing marking it reads as the model having stopped there.
+ */
+{
+  await call('clearHistory');
+  const long = 'The committee met on Tuesday to review the quarterly figures. '.repeat(12);
+  const { session } = await call('detect', { text: long });
+  const view = await call('openRow', { session, key: 'summarize' });
+  await call('runView', { session, view: view.view });
+
+  const [entry] = await call('history');
+  check('a long selection is stored clipped', entry.source.length <= 300, true);
+  check('and the clipping is visible', entry.source.endsWith('…'), true);
+  check('a short answer is left alone', entry.text.endsWith('…'), false);
+  await call('clearHistory');
+}
+
 /* ---------- report ---------- */
 
 console.log(`${passed} passed, ${failures.length} failed`);

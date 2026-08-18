@@ -7,7 +7,8 @@
   "scripts": {
     "test": "node test/detectors.test.js && node android/tools/bridge-smoke.mjs",
     "test:detectors": "node test/detectors.test.js",
-    "test:bridge": "node android/tools/bridge-smoke.mjs"
+    "test:bridge": "node android/tools/bridge-smoke.mjs",
+    "test:live": "node tools/live-apis.mjs"
   },
   "//": "There is no build step and there are no dependencies. This file exists so Node treats the source as ES modules when running the tests; Chrome does not read it."
 }

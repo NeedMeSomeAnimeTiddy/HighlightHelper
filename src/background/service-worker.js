@@ -276,7 +276,7 @@ async function handleAi({ action, text, options = {} }, onChunk = null) {
     : await runAi(action, trimmed, callOptions);
 
   await cacheSet(key, out);
-  await remember({ action, source: trimmed, text: out });
+  await remember({ action, label: options.label, source: trimmed, text: out });
   return { text: out, cached: false };
 }
 

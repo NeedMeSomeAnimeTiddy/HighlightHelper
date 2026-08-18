@@ -84,7 +84,7 @@ function runDetail(text, tool, language) {
   return {
     kind: 'stream',
     loading: `${tool.name}…`,
-    run: (api, emit) => api.ai(AI.CUSTOM, text, { systemPrompt: systemPromptFor(api) }, emit),
+    run: (api, emit) => api.ai(AI.CUSTOM, text, { systemPrompt: systemPromptFor(api), label: tool.name }, emit),
     /*
      * `done` is handed the api for the same reason `run` is: the tool's own
      * prompt is the system turn the thread continues from, and filling the

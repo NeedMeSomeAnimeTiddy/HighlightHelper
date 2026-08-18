@@ -226,7 +226,7 @@ function apiFor(s) {
       // something anyone requested. Recording it would fill the history with
       // entries for a step the user never saw.
       if (s.settings.keepHistory !== false && action !== AI.TOPICS) {
-        remember({ action, source: text, text: answer }).catch(() => {});
+        remember({ action, label: merged.label, source: text, text: answer }).catch(() => {});
       }
 
       return { ok: true, text: answer, cached: Boolean(res.cached) };

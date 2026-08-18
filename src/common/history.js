@@ -18,6 +18,17 @@ const MAX_ENTRIES = 60;
 const MAX_SOURCE_CHARS = 300;
 const MAX_RESULT_CHARS = 2000;
 
+/**
+ * Clips to `max`, and says so.
+ *
+ * A record that ends mid-sentence with nothing marking it looks like the model
+ * stopped there. One character spent on an ellipsis is the difference between
+ * "this was shortened" and "this is what you got".
+ */
+function clip(value, max) {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
 export async function readHistory() {
   try {
     const { [KEY]: list = [] } = await chrome.storage.local.get(KEY);
@@ -34,21 +45,33 @@ export async function readHistory() {
  * stacking — re-running a tool on the same selection is the commonest thing
  * there is, and a history that was ninety percent one repeated lookup would be
  * useless.
+ *
+ * `label` is for the case the action id cannot describe: every tool someone
+ * writes reports the same action, so without it a history of five custom tools
+ * is five identical-looking rows. It also takes part in the de-duplication,
+ * because two different tools run over the same sentence are two different
+ * answers however alike their action ids are.
  */
 export async function remember(entry) {
   const source = String(entry?.source || '').trim();
   const text = String(entry?.text || '').trim();
   if (!source || !text) return;
 
+  const label = String(entry?.label || '').trim();
+
   const record = {
     action: entry.action || '',
-    source: source.slice(0, MAX_SOURCE_CHARS),
-    text: text.slice(0, MAX_RESULT_CHARS),
+    ...(label ? { label } : {}),
+    source: clip(source, MAX_SOURCE_CHARS),
+    text: clip(text, MAX_RESULT_CHARS),
     at: Date.now()
   };
 
-  const list = (await readHistory())
-    .filter((h) => !(h.action === record.action && h.source === record.source));
+  const list = (await readHistory()).filter(
+    (h) => !(h.action === record.action
+      && (h.label || '') === label
+      && h.source === record.source)
+  );
 
   list.unshift(record);
   await chrome.storage.local.set({ [KEY]: list.slice(0, MAX_ENTRIES) });

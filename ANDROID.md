@@ -40,7 +40,8 @@ will fetch a system image, or a connected phone works with `./gradlew :app:insta
 
 ```bash
 npm test                              # detectors, then the bridge, in Node
-cd android && ./gradlew test          # the response cache, on the JVM
+npm run test:live                     # the real Wikipedia/Wiktionary/rate APIs
+cd android && ./gradlew test          # the cache and the key-value store, on the JVM
 ```
 
 The bridge smoke test runs the real detectors against a stubbed `AndroidHost`, which is what
@@ -49,8 +50,16 @@ being built in JS, settings reaching detectors, submenu keys surviving. The Grad
 covers the cache, whose failures are all silent ones — a stale answer looks exactly like a
 fresh one.
 
-Neither replaces running it. What no test here touches: the WebView actually loading, the
-selection toolbar entry appearing, replacement landing in another app's text field.
+`test:live` is deliberately outside `npm test`. Everything else stubs the network, which is
+right — a suite that fails when a train goes into a tunnel teaches you nothing — but that
+leaves the one failure nobody would cause and nobody would notice: a service answering in a
+shape these parsers no longer recognise. Every stub would keep passing and the first sign
+would be a user seeing "no article for that". Run it before a release, or when a lookup
+starts failing and you want to know whose end it is.
+
+None of them replaces running the app. What no test here touches: the WebView actually
+loading, the selection toolbar entry appearing, and replacement landing in another app's
+text field.
 
 ---
 
@@ -447,15 +456,8 @@ What is missing, in the order it will be noticed:
 - **No on-device model.** Every AI call goes to DeepSeek, so the desktop promise that a
   selection can stay on the machine has no equivalent here yet. ML Kit GenAI is the
   route; see the provider table above.
-- **History cannot tell your own tools apart.** Every user-written tool records
-  `action: 'custom'`, because that is the action `custom.js` sends, so they all share one
-  label. Fixing it means recording the tool's id alongside the action — a change to
-  `history.js` and `custom.js`, which would improve the extension equally.
-- **Truncation is invisible.** `history.js` clips a source at 300 characters and an
-  answer at 2000 and marks neither, so an entry can end mid-sentence with nothing saying
-  why.
-- **Per-app enable/disable** is unbuilt. The calling package is available and unused;
-  it is the natural analogue of `disabledSites`.
+- **Highlighting** aside, the only thing the phone cannot do that the panel can is paint
+  on a page. Everything else in the tool table above is built.
 
 **B0 before B1 is the load-bearing ordering.** It is tempting to skip it and let the Android
 app read `matches()` directly — that is Option 2 by the back door, and the drift starts on day

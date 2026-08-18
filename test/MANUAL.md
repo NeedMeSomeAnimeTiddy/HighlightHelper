@@ -36,6 +36,17 @@ broken everywhere, and finding it takes a minute rather than an hour.
 Switch the **browser or OS** to dark mode and reload to check the dark palette; the panel
 follows `prefers-color-scheme`.
 
+And before blaming the extension for a failed lookup:
+
+```
+npm run test:live
+```
+
+That calls the real Wikipedia, Wiktionary, Datamuse and exchange-rate endpoints through the
+same modules the extension uses. If it fails, the service changed or the network is down and
+nothing in `src/` is at fault — which is worth knowing before spending an hour in the
+debugger.
+
 ---
 
 ## Before you start: the two error logs
