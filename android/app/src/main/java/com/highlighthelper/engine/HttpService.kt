@@ -26,6 +26,10 @@ import java.util.concurrent.TimeUnit
  */
 class HttpService {
 
+    private companion object {
+        const val USER_AGENT = "HighlightHelper/0.1.0 (Android; term lookup for highlighted text)"
+    }
+
     private val client = OkHttpClient.Builder()
         .callTimeout(15, TimeUnit.SECONDS)
         .build()
@@ -38,9 +42,18 @@ class HttpService {
         val request = Request.Builder()
             .url(url)
             .header("Accept", "application/json")
-            // The Wikimedia APIs ask callers to identify themselves, and a
-            // request without this is liable to be throttled first.
-            .header("Api-User-Agent", "HighlightHelper/0.1 (Android)")
+            /*
+             * A real User-Agent, and it is not optional.
+             *
+             * Wikimedia refuses generic library agents outright — OkHttp's
+             * default "okhttp/5.5.0" comes back 403, which is what made "Find
+             * a source" fail on every term. The extension never met this
+             * because a browser sends its own; `Api-User-Agent` exists purely
+             * because browsers will not let a caller set the real one, and it
+             * does not substitute for it anywhere else.
+             */
+            .header("User-Agent", USER_AGENT)
+            .header("Api-User-Agent", USER_AGENT)
             .build()
 
         client.newCall(request).execute().use { response ->

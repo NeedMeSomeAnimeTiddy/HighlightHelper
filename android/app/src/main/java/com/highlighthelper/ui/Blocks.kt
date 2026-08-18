@@ -20,8 +20,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.content.getSystemService
 import com.highlighthelper.engine.DetectorEngine
@@ -202,7 +207,7 @@ fun BlockView(
                     Text(block.str("text").orEmpty())
                 }
             } else {
-                Text(block.str("text").orEmpty(), style = MaterialTheme.typography.bodyMedium)
+                Text(richText(block), style = MaterialTheme.typography.bodyMedium)
             }
         }
 
@@ -755,6 +760,42 @@ private fun FailureNote(message: String) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error
     )
+}
+
+/**
+ * A model's answer, with its markdown rendered rather than shown.
+ *
+ * The parsing is not done here. Every prompt asks for a bare answer, models
+ * emit `**bold**` anyway, and the reader that copes with that — including the
+ * rules that stop an italic marker eating a snake_case identifier or a
+ * multiplication sign — lives in `kit.js` and is tested in Node. The bridge
+ * sends its tokens, so this only has to decide what bold looks like.
+ *
+ * A block with no tokens is plain text and renders as itself, which is also
+ * what a partial answer does while it is still streaming: half-written
+ * markdown renders as nonsense, so formatting waits for the finished blocks.
+ */
+@Composable
+private fun richText(block: JsonObject): AnnotatedString {
+    val tokens = block["tokens"]?.jsonArray
+        ?: return AnnotatedString(block.str("text").orEmpty())
+
+    val code = MaterialTheme.colorScheme.surfaceVariant
+
+    return buildAnnotatedString {
+        tokens.forEach { entry ->
+            val token = entry.jsonObject
+            val text = token.str("text").orEmpty()
+            when (token.str("tag")) {
+                "strong" -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(text) }
+                "em" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(text) }
+                "code" -> withStyle(
+                    SpanStyle(fontFamily = FontFamily.Monospace, background = code)
+                ) { append(text) }
+                else -> append(text)
+            }
+        }
+    }
 }
 
 private fun JsonObject.str(key: String): String? =

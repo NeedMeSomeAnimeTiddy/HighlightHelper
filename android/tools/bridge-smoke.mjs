@@ -100,7 +100,10 @@ globalThis.AndroidHost = {
       // a status the lookup modules read directly, and a body they parse.
       reply = { status: 200, body: JSON.stringify(WIKI_SUMMARY) };
     } else if (message.type === 'ai' || message.type === 'chat') {
-      reply = { ok: true, text: '  "A stubbed answer."  ', cached: false };
+      // Wrapped in quotes and padding so cleanOutput has something to strip,
+      // and carrying markdown so the reader has something to read. Models do
+      // both of these however firmly the prompt asks them not to.
+      reply = { ok: true, text: '  "A stubbed answer, with **bold** and `code` in it."  ', cached: false };
     } else {
       reply = { ok: true };
     }
@@ -265,7 +268,8 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
   check('the system prompt is the real one', ai.system.includes('summar'), true);
   check('a streamed view asks the host to stream', ai.stream, true);
   check('the answer comes back through cleanOutput',
-    blocks.find((b) => b.type === 'text').text, 'A stubbed answer.');
+    blocks.find((b) => b.type === 'text').text,
+    'A stubbed answer, with **bold** and `code` in it.');
 }
 
 /*
@@ -386,12 +390,38 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
   // with no idea what the first one was about.
   const first = await call('ask', { session, chat: conversation.chat, question: 'why?' });
   const second = await call('ask', { session, chat: conversation.chat, question: 'and then?' });
-  check('a follow-up answers', first, 'A stubbed answer.');
-  check('and answers again on the same thread', second, 'A stubbed answer.');
+  check('a follow-up answers', first, 'A stubbed answer, with **bold** and `code` in it.');
+  check('and answers again on the same thread', second, 'A stubbed answer, with **bold** and `code` in it.');
 
   const asked = hostCalls.filter((c) => c.type === 'chat');
   check('the thread grows rather than restarting',
     asked.at(-1).messages.length > asked[0].messages.length, true);
+}
+
+/*
+ * A model's markdown, read before it crosses.
+ *
+ * `rich: true` is a flag the panel knows how to act on and Kotlin did not, so
+ * an explanation arrived on the phone with its asterisks still in it. The
+ * parsed tokens cross instead, which keeps the one markdown reader this
+ * project has serving both platforms.
+ */
+{
+  const { session } = await call('detect', { text: 'SLA' });
+  const view = await call('openRow', { session, key: 'explain' });
+  const blocks = await call('runView', { session, view: view.view });
+
+  const text = blocks.find((b) => b.type === 'text');
+  check('a rich text block carries parsed tokens', Array.isArray(text.tokens), true);
+  check('the markers are gone from the words',
+    text.tokens.some((t) => t.text.includes('**')), false);
+  check('and what was bold is marked bold',
+    text.tokens.some((t) => t.tag === 'strong'), true);
+  check('and inline code is marked as code',
+    text.tokens.some((t) => t.tag === 'code'), true);
+  check('the words themselves are unchanged',
+    text.tokens.map((t) => t.text).join(''),
+    'A stubbed answer, with bold and code in it.');
 }
 
 /* The QR grid, as data rather than as a drawing. */

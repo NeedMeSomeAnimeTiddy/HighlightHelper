@@ -27,6 +27,7 @@ import { DEFAULTS } from './src/common/settings.js';
 import { buildPrompt, cleanOutput } from './src/common/prompts.js';
 import { lookup, searchLinks, wikiLang } from './src/background/wikipedia.js';
 import { define, synonyms, dictionaryLinks, wiktLang } from './src/background/dictionary.js';
+import { parseMarkup } from './src/content/kit.js';
 import { LANGUAGES } from './src/common/languages.js';
 import { CURRENCY_CODES, currencyName } from './src/common/currencies.js';
 
@@ -328,6 +329,19 @@ function describeBlock(s, b) {
 
     case 'speech':
       return { type: 'speech', text: b.text, lang: b.lang || null };
+
+    /*
+     * A rich text block is read here rather than on the far side.
+     *
+     * Models emit `**like this**` however firmly the prompt asks them not to,
+     * and the panel renders it instead of showing the asterisks. Android was
+     * printing them, because `rich` was a flag it had no reader for. Sending
+     * the parsed tokens rather than the flag means the one markdown reader
+     * this project has — tested in Node, and full of hard-won rules about
+     * snake_case and multiplication signs — serves both platforms.
+     */
+    case 'text':
+      return b.rich ? { ...b, tokens: parseMarkup(b.text) } : b;
 
     /*
      * The escape hatch, and the one thing that genuinely does not port. A
