@@ -377,6 +377,55 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
     ['string', true, true]);
   check('a provider whose endpoint is typed says so',
     info.providers.find((p) => p.id === 'custom').editableEndpoint, true);
+
+  // The settings screen shows an entirely different set of fields for a service
+  // that signs in, so it has to be told which kind each one is rather than
+  // inferring it from the absence of a key.
+  const signsIn = info.providers.find((p) => p.id === 'oauth');
+  check('the sign-in provider is marked as one',
+    [signsIn.auth, signsIn.needsKey], ['oauth', false]);
+  check('and every other provider is not',
+    info.providers.filter((p) => p.id !== 'oauth').every((p) => p.auth === 'key'), true);
+}
+
+/*
+ * A sign-in's configuration reaches Kotlin; its tokens never do.
+ *
+ * The client id and URLs are public by construction and have to travel, because
+ * Kotlin is the side that runs the flow. The access token is a bearer
+ * credential and lives only in the keystore — if one ever appeared in this
+ * payload it would be readable from the WebView, which is the whole thing the
+ * split exists to prevent.
+ */
+{
+  const { session } = await call('detect', {
+    text: 'The committee met on Tuesday to review the quarterly figures. '.repeat(6),
+    settings: {
+      aiService: 'oauth',
+      aiEndpoint: 'https://gateway.example.com/v1/chat/completions',
+      oauth: {
+        clientId: 'client-123',
+        authUrl: 'https://login.example.com/authorize',
+        tokenUrl: 'https://login.example.com/token',
+        scope: 'openid offline_access'
+      }
+    }
+  });
+
+  hostCalls.length = 0;
+  const view = await call('openRow', { session, key: 'summarize' });
+  await call('runView', { session, view: view.view });
+
+  const ai = hostCalls.find((c) => c.type === 'ai');
+  check('the request says the credential is a token, not a key',
+    [ai.provider.auth, ai.provider.needsKey], ['oauth', false]);
+  check('the sign-in configuration travels with it',
+    [ai.provider.oauth.clientId, ai.provider.oauth.tokenUrl],
+    ['client-123', 'https://login.example.com/token']);
+  check('the endpoint is the one that was typed',
+    ai.provider.endpoint, 'https://gateway.example.com/v1/chat/completions');
+  check('and no credential of any kind is in the payload',
+    JSON.stringify(ai).match(/accessToken|refreshToken|"key"|apiKey/), null);
 }
 
 /*

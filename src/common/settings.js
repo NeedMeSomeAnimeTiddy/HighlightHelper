@@ -41,6 +41,13 @@ export const DEFAULTS = {
    */
   aiEndpoint: '',
 
+  /**
+   * Where the `oauth` provider signs in. Not secret — a client id is a public
+   * identifier and the URLs belong to whoever runs the server. The tokens it
+   * produces are secret and live in local storage with the API keys.
+   */
+  oauth: { clientId: '', authUrl: '', tokenUrl: '', scope: '', audience: '' },
+
   /** Per-detector on/off switches, keyed by detector id. */
   detectors: {
     color: true,
@@ -116,7 +123,11 @@ export async function getSettings() {
   return {
     ...DEFAULTS,
     ...stored,
-    detectors: { ...DEFAULTS.detectors, ...(stored.detectors || {}) }
+    detectors: { ...DEFAULTS.detectors, ...(stored.detectors || {}) },
+    // Merged a level deeper for the same reason as `detectors`: a saved
+    // `{ clientId }` must not be the whole of the OAuth settings, or filling in
+    // one field would blank the other four.
+    oauth: { ...DEFAULTS.oauth, ...(stored.oauth || {}) }
   };
 }
 
@@ -126,7 +137,8 @@ export async function saveSettings(patch) {
   const next = {
     ...current,
     ...patch,
-    detectors: { ...current.detectors, ...(patch.detectors || {}) }
+    detectors: { ...current.detectors, ...(patch.detectors || {}) },
+    oauth: { ...current.oauth, ...(patch.oauth || {}) }
   };
   await chrome.storage.sync.set({ settings: next });
   return next;
@@ -175,6 +187,27 @@ export async function setApiKey(providerId, key) {
 export async function configuredProviders() {
   const keys = await allKeys();
   return Object.keys(keys).filter((id) => (keys[id] || '').trim());
+}
+
+/**
+ * OAuth tokens, kept exactly where the API keys are and for the same reason.
+ *
+ * An access token is a bearer credential: whoever holds it can spend the
+ * account it belongs to until it expires. That it was obtained by signing in
+ * rather than by pasting makes no difference to how it must be stored, so it is
+ * local-only, never synced, and only the service worker reads it.
+ */
+export async function getTokens(providerId) {
+  const { oauthTokens = {} } = await chrome.storage.local.get('oauthTokens');
+  return oauthTokens[providerId] || null;
+}
+
+export async function setTokens(providerId, tokens) {
+  const { oauthTokens = {} } = await chrome.storage.local.get('oauthTokens');
+  const next = { ...oauthTokens };
+  if (tokens) next[providerId] = tokens;
+  else delete next[providerId];
+  await chrome.storage.local.set({ oauthTokens: next });
 }
 
 /** Fires `cb(newSettings)` whenever preferences change in any context. */

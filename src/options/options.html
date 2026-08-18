@@ -114,6 +114,69 @@
         </p>
       </div>
 
+      <div id="oauthFields" hidden>
+        <div class="field">
+          <label for="oauthClientId">Client ID</label>
+          <input id="oauthClientId" type="text" spellcheck="false" autocomplete="off">
+          <p class="hint">
+            Issued to you by whoever runs the sign-in server, for this app specifically.
+            There is no client secret — a secret shipped inside a downloadable extension
+            would not be one.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="oauthAuthUrl">Authorization URL</label>
+          <input id="oauthAuthUrl" type="url" spellcheck="false" autocomplete="off"
+                 placeholder="https://login.example.com/oauth/authorize">
+        </div>
+
+        <div class="field">
+          <label for="oauthTokenUrl">Token URL</label>
+          <input id="oauthTokenUrl" type="url" spellcheck="false" autocomplete="off"
+                 placeholder="https://login.example.com/oauth/token">
+        </div>
+
+        <div class="field">
+          <label for="oauthScope">Scope</label>
+          <input id="oauthScope" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="openid profile offline_access">
+          <p class="hint">
+            Include whatever your server wants for a refresh token — usually
+            <code>offline_access</code>. Without one you will be signed out when the
+            access token expires.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="oauthAudience">Audience <span class="hint inline">(optional)</span></label>
+          <input id="oauthAudience" type="text" spellcheck="false" autocomplete="off">
+          <p class="hint">
+            Only for servers that need it — Auth0 and its imitators will otherwise issue a
+            token the API then rejects.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="redirectUri">Redirect URI to register</label>
+          <div class="row">
+            <input id="redirectUri" type="text" readonly spellcheck="false">
+            <button id="copyRedirect" type="button" class="ghost">Copy</button>
+          </div>
+          <p class="hint">
+            Add this to the allowed redirect URIs on the server. It contains this
+            installation's extension ID, so it changes if the extension is reloaded from a
+            different folder.
+          </p>
+        </div>
+
+        <div class="row">
+          <button id="signIn" type="button" class="primary">Sign in</button>
+          <button id="signOut" type="button" class="ghost">Sign out</button>
+          <span id="signInStatus" class="status" role="status"></span>
+        </div>
+      </div>
+
       <div class="field" id="keyField">
         <label for="apiKey">API key</label>
         <div class="row">
@@ -131,10 +194,11 @@
       </div>
 
       <p class="hint">
-        Signing in with a ChatGPT or Claude.ai subscription is not one of the options, and
-        can't be: neither company offers a way for an app like this to spend a chat
-        subscription. The keys above are billed separately, per request, on the provider's own
-        account.
+        These are API keys, billed per request — a ChatGPT Plus or Claude.ai subscription
+        does not cover them, and no OAuth client this extension could register would change
+        that. Spending a subscription requires the provider's own signed desktop client; see
+        <a href="https://github.com/NeedMeSomeAnimeTiddy/HighlightHelper/blob/main/OAUTH.md"
+           target="_blank" rel="noreferrer noopener">OAUTH.md</a>.
       </p>
     </section>
 

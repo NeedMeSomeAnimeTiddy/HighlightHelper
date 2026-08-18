@@ -28,7 +28,16 @@ export const MSG = {
   CHAT: 'hh:chat',
   /** Recent answers, for the history list on the options page. */
   HISTORY: 'hh:history',
-  CLEAR_HISTORY: 'hh:clear-history'
+  CLEAR_HISTORY: 'hh:clear-history',
+  /**
+   * The OAuth flow, run by the worker on the options page's behalf.
+   *
+   * The options page asks for the sign-in and is told whether it worked; the
+   * token itself never leaves the worker, exactly like an API key.
+   */
+  SIGN_IN: 'hh:sign-in',
+  SIGN_OUT: 'hh:sign-out',
+  SIGN_IN_STATE: 'hh:sign-in-state'
 };
 
 /**
@@ -85,6 +94,12 @@ export const PROVIDER = {
 /** Sentinel error codes the UI reacts to specially. */
 export const ERR = {
   NO_KEY: 'NO_KEY',
+  /**
+   * The chosen provider signs in rather than holding a key, and either nobody
+   * has, or the grant has been revoked and the refresh token no longer works.
+   * Distinct from NO_KEY because the fix is a button, not a paste.
+   */
+  NOT_SIGNED_IN: 'NOT_SIGNED_IN',
   BAD_KEY: 'BAD_KEY',
   NO_FUNDS: 'NO_FUNDS',
   RATE_LIMIT: 'RATE_LIMIT',

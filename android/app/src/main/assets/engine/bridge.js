@@ -197,7 +197,13 @@ function describeProvider(settings, overrides = {}) {
     api: chosen.api,
     endpoint: chosen.endpoint,
     model: chosen.model,
-    needsKey: chosen.needsKey
+    needsKey: chosen.needsKey,
+    // Which credential to attach. The credential itself is never sent — Kotlin
+    // holds both the keys and the tokens, and this only says which drawer to
+    // open. The OAuth config that travels with it is public by construction:
+    // a client id and two URLs, no secret.
+    auth: chosen.auth,
+    oauth: chosen.oauth
   };
 }
 
@@ -722,7 +728,11 @@ const METHODS = {
         keyHint: p.keyHint || '',
         note: p.note || '',
         needsKey: p.needsKey !== false,
-        editableEndpoint: Boolean(p.editableEndpoint)
+        editableEndpoint: Boolean(p.editableEndpoint),
+        // Whether this one signs in or holds a key. The settings screen shows a
+        // different set of fields for each, and Kotlin must not have to guess
+        // from the absence of a key which was meant.
+        auth: p.auth === 'oauth' ? 'oauth' : 'key'
       }))
     };
   }

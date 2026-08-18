@@ -7,12 +7,14 @@
  */
 
 import { MSG, AI, PORT } from '../common/constants.js';
-import { getSettings, getApiKey, onSettingsChanged } from '../common/settings.js';
+import { getSettings, getApiKey, getTokens, onSettingsChanged } from '../common/settings.js';
 import { CONTEXT_MENU_LANGUAGES, languageName } from '../common/languages.js';
 import { CONTEXT_TOOLS } from '../common/tools.js';
 import { cacheGet, cacheSet, cacheClear, cacheStats } from '../common/cache.js';
 import { cacheKey, hash } from '../common/hash.js';
-import { resolveProvider } from '../common/providers.js';
+import { resolveProvider, oauthConfig, oauthReady } from '../common/providers.js';
+import { signIn, signOut, redirectUri } from './signin.js';
+import { describeTokens } from '../common/oauth.js';
 import { getRates, clearRates } from './rates.js';
 import { runAi, runAiStream, runChat, testApiKey } from './ai.js';
 import { readHistory, remember as rememberRaw, clearHistory } from '../common/history.js';
@@ -373,6 +375,39 @@ async function handle(msg) {
         endpoint: msg.endpoint,
         model: msg.model
       });
+
+    /*
+     * The sign-in flow, run here rather than on the options page.
+     *
+     * Only the outcome crosses back. The options page learns that a sign-in
+     * worked and roughly how long the token lasts; it never receives the token,
+     * which is the same rule the API keys follow.
+     */
+    case MSG.SIGN_IN: {
+      const settings = await getSettings();
+      const config = oauthConfig(settings);
+      const ready = oauthReady(config);
+      if (!ready.ok) {
+        return { ok: false, error: `Fill in the ${ready.missing.join(', ')} first.` };
+      }
+      try {
+        const tokens = await signIn(msg.providerId || 'oauth', config);
+        return { ok: true, state: describeTokens(tokens) };
+      } catch (err) {
+        return { ok: false, error: String(err?.message || err) };
+      }
+    }
+
+    case MSG.SIGN_OUT:
+      await signOut(msg.providerId || 'oauth');
+      return { ok: true, state: describeTokens(null) };
+
+    case MSG.SIGN_IN_STATE:
+      return {
+        ok: true,
+        state: describeTokens(await getTokens(msg.providerId || 'oauth')),
+        redirectUri: redirectUri()
+      };
 
     case MSG.CLEAR_CACHE: {
       const responses = await cacheClear();

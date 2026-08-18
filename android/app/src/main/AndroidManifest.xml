@@ -71,6 +71,33 @@
             </intent-filter>
         </activity>
 
+        <!--
+          Where a sign-in comes back to.
+
+          The Custom Tab belongs to the browser, so the authorization code cannot
+          be delivered as an Activity result; it arrives as this app link. It has
+          to be `exported`, because the browser is what starts it — which is also
+          why the flow checks the `state` parameter before trusting anything in
+          the URI. `singleTask` keeps the return landing on the existing task
+          rather than stacking a second copy of the app.
+
+          The scheme is the package name, which is the convention that keeps two
+          apps from claiming the same redirect.
+        -->
+        <activity
+            android:name=".OAuthRedirectActivity"
+            android:theme="@style/Theme.HighlightHelper.Transparent"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.highlighthelper" android:host="oauth" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>

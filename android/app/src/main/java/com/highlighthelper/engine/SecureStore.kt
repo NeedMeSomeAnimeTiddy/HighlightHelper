@@ -4,6 +4,13 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 /**
  * The API keys, and nothing else.
@@ -74,6 +81,50 @@ class SecureStore(context: Context) {
     fun hasKeyFor(providerId: String): Boolean = keyFor(providerId).isNotEmpty()
 
     private fun entry(providerId: String) = "api_key_$providerId"
+
+    /**
+     * OAuth tokens, kept beside the keys because they are the same kind of
+     * thing: a bearer credential that spends an account until it expires. How
+     * it was obtained changes nothing about how it must be stored.
+     *
+     * Held as one JSON blob rather than three preferences so a token and its
+     * expiry cannot be written apart and read together — a refresh that updated
+     * the token but not the deadline would look valid and 401 forever.
+     */
+    fun tokensFor(providerId: String): Tokens? {
+        val raw = prefs.getString(tokenEntry(providerId), null) ?: return null
+        return runCatching {
+            val row = Json.parseToJsonElement(raw).jsonObject
+            Tokens(
+                accessToken = row["accessToken"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                refreshToken = row["refreshToken"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                expiresAt = row["expiresAt"]?.jsonPrimitive?.longOrNull ?: 0L
+            )
+        }.getOrNull()?.takeIf { it.accessToken.isNotEmpty() }
+    }
+
+    fun setTokens(providerId: String, tokens: Tokens?) {
+        prefs.edit().apply {
+            if (tokens == null) {
+                remove(tokenEntry(providerId))
+            } else {
+                putString(tokenEntry(providerId), buildJsonObject {
+                    put("accessToken", tokens.accessToken)
+                    put("refreshToken", tokens.refreshToken)
+                    put("expiresAt", tokens.expiresAt)
+                }.toString())
+            }
+        }.apply()
+    }
+
+    private fun tokenEntry(providerId: String) = "oauth_tokens_$providerId"
+
+    /** `expiresAt` is epoch milliseconds; zero means the server stated no expiry. */
+    data class Tokens(
+        val accessToken: String,
+        val refreshToken: String,
+        val expiresAt: Long
+    )
 
     private companion object {
         const val LEGACY_KEY = "deepseek_api_key"

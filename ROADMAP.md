@@ -50,6 +50,37 @@ a new module, not a refactor.
 *Shipped. What follows is the plan as written; the notes marked **as built** record where
 reality differed. See [Where AI runs](README.md#where-ai-runs).*
 
+### Not built: a ChatGPT subscription as a provider
+
+Worth writing down because the obvious version of it is a trap and the workable
+version is a bigger job than it looks.
+
+**The trap.** Hardcode the Codex CLI's OAuth client id and run the PKCE flow as if this
+extension were Codex. It works. It also impersonates a first-party client, breaches
+OpenAI's terms, and — because this is distributed — stakes *other people's* ChatGPT
+accounts on that, not just the author's. Not doing it.
+
+**The workable version.** Drive the real Codex CLI: OpenAI signs it, the user installs
+it, and it logs in through OpenAI's own flow. `account/login/start {type:'chatgpt'}` over
+its `app-server` JSON-RPC protocol returns a URL to open; Codex holds the tokens in its
+own home directory and this project never sees a client id or a credential. The
+[Fovea](../SnipChat) desktop app does precisely this, pinning and SHA-256-verifying the
+binary from `github.com/openai/codex/releases`.
+
+What it costs here, and why it is not a small change:
+
+| | |
+| --- | --- |
+| **Extension** | MV3 cannot spawn a process. Needs a **native messaging host** — a small local program plus a registry key (Windows) or a manifest in a fixed directory (macOS/Linux), naming the extension id. That is an installer, for a project whose whole install story is currently "load unpacked" |
+| **Android** | Codex is a desktop binary; there is no Android build and there will not be one. The phone can only reach a Codex running on a computer, over the LAN |
+| **Shape mismatch** | Codex speaks threads and turns, not `/chat/completions`. The provider registry's whole premise is one wire format with one exception; this would be a third |
+
+**The cheap approximation that works today, with no new code:** run any local
+OpenAI-compatible bridge in front of Codex and point the **"Anything else"** provider at
+`http://localhost:PORT/v1/chat/completions`. The subscription is spent by the user's own
+logged-in tool, the extension talks to an ordinary endpoint, and Android works too if it
+can reach the machine.
+
 
 The largest strategic change available: it moves the install story from *"first, get a
 DeepSeek key"* to *"it works"*.

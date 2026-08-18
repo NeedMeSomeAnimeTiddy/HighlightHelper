@@ -151,6 +151,35 @@ export const PROVIDERS = [
     models: [],
     editableEndpoint: true,
     note: 'Paste the full chat-completions URL. LM Studio, vLLM, llama.cpp, a company gateway.'
+  },
+  {
+    id: 'oauth',
+    name: 'Sign in instead (OAuth 2.0)',
+    api: 'openai',
+    endpoint: '',
+    defaultModel: '',
+    models: [],
+    editableEndpoint: true,
+    /*
+     * A credential obtained by signing in, rather than one pasted in.
+     *
+     * This exists for endpoints that are protected by an identity provider
+     * rather than by a static key — a company gateway behind Entra ID or Okta,
+     * an Azure OpenAI deployment, a LiteLLM proxy with OIDC in front of it.
+     * The app is a public OAuth client: authorization code with PKCE, no client
+     * secret, because a secret shipped inside a downloadable app is not a
+     * secret.
+     *
+     * It is deliberately configured rather than preset: every field has to come
+     * from whoever runs the authorization server, and a client id is issued to
+     * a named application. This is why there is no "Sign in with ChatGPT"
+     * button here — OpenAI issues no client id an app like this could hold. The
+     * legitimate route to a ChatGPT subscription is driving the real Codex CLI,
+     * which is a different mechanism entirely. See OAUTH.md.
+     */
+    auth: 'oauth',
+    needsKey: false,
+    note: 'For an endpoint behind a login rather than an API key. Needs a client id issued to you.'
   }
 ];
 
@@ -185,8 +214,45 @@ export function resolveProvider(settings = {}, overrides = {}) {
     endpoint,
     model: (overrides.model || settings.model || provider.defaultModel || '').trim(),
     needsKey: provider.needsKey !== false,
-    keysAt: provider.keysAt || ''
+    keysAt: provider.keysAt || '',
+    /**
+     * How the request is authenticated: a stored key, or a token from a
+     * sign-in. Both end up in the same Authorization header, which is why this
+     * is one flag rather than a second transport.
+     */
+    auth: provider.auth === 'oauth' ? 'oauth' : 'key',
+    oauth: provider.auth === 'oauth' ? oauthConfig(settings) : null
   };
+}
+
+/**
+ * The user's OAuth settings, normalised.
+ *
+ * Kept in ordinary settings rather than in the registry because every value is
+ * specific to one deployment: the client id is issued to whoever registered
+ * this app with their identity provider, and the URLs belong to that provider.
+ * Nothing here is secret — the tokens it produces are, and those live where the
+ * API keys live.
+ */
+export function oauthConfig(settings = {}) {
+  const raw = settings.oauth || {};
+  return {
+    clientId: (raw.clientId || '').trim(),
+    authUrl: (raw.authUrl || '').trim(),
+    tokenUrl: (raw.tokenUrl || '').trim(),
+    scope: (raw.scope || '').trim(),
+    // Some servers (Auth0, and anything copying it) will not issue a token for
+    // an API unless the audience is named, and return an opaque token that the
+    // API then rejects — a failure that looks like a permissions problem three
+    // steps later. Optional, and empty for servers that do not use it.
+    audience: (raw.audience || '').trim()
+  };
+}
+
+/** Whether a sign-in can even be attempted, and what is missing if not. */
+export function oauthReady(config) {
+  const missing = ['clientId', 'authUrl', 'tokenUrl'].filter((field) => !config?.[field]);
+  return { ok: missing.length === 0, missing };
 }
 
 /** The origin a provider talks to, for an optional host permission request. */

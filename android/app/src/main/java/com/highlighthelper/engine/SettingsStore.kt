@@ -48,13 +48,18 @@ class SettingsStore(private val context: Context) {
                 existing.forEach { (k, v) -> put(k, v) }
                 patch.forEach { (k, v) -> put(k, v) }
 
-                val detectors = (existing["detectors"] as? JsonObject)
-                val patched = (patch["detectors"] as? JsonObject)
-                if (detectors != null || patched != null) {
-                    put("detectors", buildJsonObject {
-                        detectors?.forEach { (k, v) -> put(k, v) }
-                        patched?.forEach { (k, v) -> put(k, v) }
-                    })
+                // The two settings whose values are objects rather than scalars.
+                // Without this a patch carrying one detector, or one OAuth
+                // field, would replace the whole map with itself alone.
+                for (nested in listOf("detectors", "oauth")) {
+                    val before = (existing[nested] as? JsonObject)
+                    val patched = (patch[nested] as? JsonObject)
+                    if (before != null || patched != null) {
+                        put(nested, buildJsonObject {
+                            before?.forEach { (k, v) -> put(k, v) }
+                            patched?.forEach { (k, v) -> put(k, v) }
+                        })
+                    }
                 }
             }
             prefs[KEY] = merged.toString()

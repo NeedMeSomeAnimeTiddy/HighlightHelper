@@ -44,8 +44,19 @@ import {
   readAnswer,
   readDelta,
   describeHttpError,
-  originFor
+  originFor,
+  oauthConfig,
+  oauthReady
 } from '../src/common/providers.js';
+import {
+  pkce,
+  authorizeUrl,
+  readRedirect,
+  readTokens,
+  isExpired,
+  tokenExchangeBody,
+  refreshBody
+} from '../src/common/oauth.js';
 import { runLocal, isSupported as localSupported, bulletsToPanelStyle }
   from '../src/content/local-ai.js';
 import { provenance, parseMarkup } from '../src/content/kit.js';
@@ -1177,6 +1188,121 @@ check('origins are derived for the permission request', [
   originFor('http://localhost:11434/v1/chat/completions'),
   originFor('')
 ], ['https://api.openai.com/*', 'http://localhost:11434/*', '']);
+
+/* ---------- signing in instead of pasting a key ---------- */
+
+/*
+ * The OAuth flow is the one place in this codebase where getting it subtly
+ * wrong is a security bug rather than a broken feature, so the checks below are
+ * about the properties that matter rather than about the strings.
+ */
+{
+  const pair = await pkce();
+
+  // The challenge must actually be the hash of the verifier. A flow that sends
+  // the verifier as its own challenge looks identical from the outside and
+  // provides none of the protection PKCE exists for.
+  const expected = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(pair.verifier)
+  );
+  const asB64Url = Buffer.from(expected)
+    .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  check('the PKCE challenge is the hash of the verifier', pair.challenge, asB64Url);
+  check('and the verifier is long enough to be unguessable', pair.verifier.length >= 43, true);
+  check('two verifiers are never the same', (await pkce()).verifier === pair.verifier, false);
+
+  const url = new URL(authorizeUrl({
+    authUrl: 'https://login.example.com/authorize',
+    clientId: 'client-123',
+    redirectUri: 'https://abc.chromiumapp.org/',
+    scope: 'openid offline_access',
+    audience: '',
+    challenge: pair.challenge,
+    state: 'state-xyz'
+  }));
+  check('the authorize URL carries the whole flow', [
+    url.searchParams.get('response_type'),
+    url.searchParams.get('code_challenge_method'),
+    url.searchParams.get('client_id'),
+    url.searchParams.get('state'),
+    url.searchParams.get('scope')
+  ], ['code', 'S256', 'client-123', 'state-xyz', 'openid offline_access']);
+  // An empty audience must be absent, not present and blank: some servers
+  // reject an empty one rather than ignoring it.
+  check('an unset audience is left out entirely', url.searchParams.has('audience'), false);
+}
+
+// The state check is what stops a redirect this app never started from being
+// accepted as a sign-in. Its absence is the classic way to get this wrong.
+check('a redirect with the wrong state is refused', Boolean(
+  readRedirect('https://abc.chromiumapp.org/?code=abc&state=wrong', 'right').error
+), true);
+check('a redirect with the right state yields the code',
+  readRedirect('https://abc.chromiumapp.org/?code=abc&state=right', 'right').code, 'abc');
+check('a declined sign-in is reported as such, not as a failure',
+  readRedirect('https://abc.chromiumapp.org/?error=access_denied&state=right', 'right').error,
+  'Sign-in was declined.');
+check('an answer in the fragment is read too',
+  readRedirect('https://abc.chromiumapp.org/#code=abc&state=right', 'right').code, 'abc');
+
+// expires_in is a duration and is only meaningful beside the instant it
+// arrived, so it becomes an absolute deadline on the way in.
+check('a lifetime becomes a deadline',
+  readTokens({ access_token: 't', expires_in: 3600 }, { now: 1_000_000 }).expiresAt,
+  1_000_000 + 3_600_000);
+check('a response with no lifetime is not treated as already expired',
+  isExpired(readTokens({ access_token: 't' }, { now: 1_000_000 }), { now: 9_999_999_999 }), false);
+
+// A refresh response usually omits the refresh token, meaning "keep yours".
+// Dropping it converts a durable sign-in into one that dies at the next expiry.
+check('a refresh keeps the existing refresh token when none is returned',
+  readTokens({ access_token: 'new', expires_in: 60 }, {
+    now: 0, previous: { refreshToken: 'keep-me' }
+  }).refreshToken,
+  'keep-me');
+check('and takes a new one when the server rotates it',
+  readTokens({ access_token: 'new', refresh_token: 'rotated' }, {
+    previous: { refreshToken: 'old' }
+  }).refreshToken,
+  'rotated');
+check('a token response with no token at all is an error', (() => {
+  try {
+    readTokens({ error: 'invalid_grant', error_description: 'expired' });
+    return false;
+  } catch (err) {
+    return err.message.includes('expired');
+  }
+})(), true);
+
+// The skew is the difference between "valid when checked" and "valid when it
+// arrives at the server".
+check('a token about to expire counts as expired', [
+  isExpired({ accessToken: 't', expiresAt: 100_000 }, { now: 50_000, skewMs: 60_000 }),
+  isExpired({ accessToken: 't', expiresAt: 100_000 }, { now: 10_000, skewMs: 60_000 }),
+  isExpired(null)
+], [true, false, true]);
+
+check('the form bodies are what the spec asks for', [
+  new URLSearchParams(tokenExchangeBody({
+    clientId: 'c', code: 'x', verifier: 'v', redirectUri: 'r'
+  })).get('grant_type'),
+  new URLSearchParams(tokenExchangeBody({
+    clientId: 'c', code: 'x', verifier: 'v', redirectUri: 'r'
+  })).get('code_verifier'),
+  new URLSearchParams(refreshBody({ clientId: 'c', refreshToken: 'r' })).get('grant_type')
+], ['authorization_code', 'v', 'refresh_token']);
+
+// The oauth provider must not claim to need a key, or the settings screen shows
+// a key box for a service that will never use one.
+check('the sign-in provider asks for a token rather than a key', [
+  resolveProvider({ aiService: 'oauth' }).auth,
+  resolveProvider({ aiService: 'oauth' }).needsKey,
+  resolveProvider({ aiService: 'openai' }).auth
+], ['oauth', false, 'key']);
+check('and refuses to start until it is configured',
+  oauthReady(oauthConfig({ oauth: { clientId: 'c' } })).missing,
+  ['authUrl', 'tokenUrl']);
 
 /* ---------- report ---------- */
 

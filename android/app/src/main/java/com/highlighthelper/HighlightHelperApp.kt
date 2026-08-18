@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import com.highlighthelper.engine.AiService
+import com.highlighthelper.engine.OAuthService
 import com.highlighthelper.engine.DetectorEngine
 import com.highlighthelper.engine.HostServices
 import com.highlighthelper.engine.HttpService
@@ -35,7 +36,8 @@ class HighlightHelperApp : Application() {
     val rates: RatesService by lazy { RatesService() }
     val http: HttpService by lazy { HttpService() }
     val secrets: SecureStore by lazy { SecureStore(this) }
-    val ai: AiService by lazy { AiService(secrets) }
+    val oauth: OAuthService by lazy { OAuthService(this, secrets) }
+    val ai: AiService by lazy { AiService(secrets, oauth) }
     val settings: SettingsStore by lazy { SettingsStore(this) }
     val cache: ResponseCache by lazy { ResponseCache(this) }
     val store: KeyValueStore by lazy { KeyValueStore(this) }

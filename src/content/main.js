@@ -442,6 +442,9 @@ function friendly(code) {
       'Answers are set to stay on this machine, and the on-device model can\'t ' +
       "handle this one — it may be too long, or the model isn't installed. " +
       `Settings can allow ${name} as a fallback.`,
+    [ERR.NOT_SIGNED_IN]:
+      `${name} signs in rather than using a key, and this browser is not signed ` +
+      'in — or the session has been revoked. Settings has the button.',
     [ERR.BAD_KEY]: `${name} rejected that API key. Check it in settings.`,
     [ERR.NO_FUNDS]: `Your ${name} account is out of credit.`,
     [ERR.RATE_LIMIT]: `${name} is rate-limiting right now. Try again in a moment.`,
@@ -458,7 +461,8 @@ function errorFor(err, retry) {
   const code = String(err?.message || err);
   // Every one of these is fixed in settings, not by pressing the button again.
   const needsKey =
-    code === ERR.NO_KEY || code === ERR.BAD_KEY || code === ERR.NO_LOCAL_MODEL;
+    code === ERR.NO_KEY || code === ERR.BAD_KEY || code === ERR.NO_LOCAL_MODEL ||
+    code === ERR.NOT_SIGNED_IN;
   // Retrying a stale worker just repeats the same failure.
   const canRetry = !needsKey && code !== ERR.STALE_WORKER;
   return errorBox(friendly(code) || code, {

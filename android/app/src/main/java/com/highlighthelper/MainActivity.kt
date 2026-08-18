@@ -16,10 +16,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.highlighthelper.engine.OAuthService
 import com.highlighthelper.ui.CustomToolsScreen
 import com.highlighthelper.ui.HistoryRow
 import com.highlighthelper.ui.LoadingRow
@@ -113,7 +116,8 @@ private class EngineDefaults(payload: JsonObject) {
                 keyHint = row["keyHint"]?.text().orEmpty(),
                 note = row["note"]?.text().orEmpty(),
                 needsKey = (row["needsKey"] as? JsonPrimitive)?.booleanOrNull ?: true,
-                editableEndpoint = (row["editableEndpoint"] as? JsonPrimitive)?.booleanOrNull ?: false
+                editableEndpoint = (row["editableEndpoint"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                auth = row["auth"]?.text() ?: "key"
             )
         }
 
@@ -135,7 +139,9 @@ data class ProviderInfo(
     val keyHint: String,
     val note: String,
     val needsKey: Boolean,
-    val editableEndpoint: Boolean
+    val editableEndpoint: Boolean,
+    /** "key" or "oauth" — whether the credential is pasted or signed in for. */
+    val auth: String
 )
 
 private fun JsonElement?.asCodeNamePairs(): List<Pair<String, String>> =
@@ -160,6 +166,11 @@ private class Settings(private val overrides: JsonObject, val defaults: EngineDe
 
     fun string(key: String): String =
         (overrides[key] ?: defaults.settings[key])?.text().orEmpty()
+
+    /** A setting whose value is an object rather than a scalar — `oauth`. */
+    fun obj(key: String): JsonObject =
+        (overrides[key] as? JsonObject) ?: (defaults.settings[key] as? JsonObject)
+            ?: JsonObject(emptyMap())
 
     fun int(key: String, fallback: Int): Int =
         (overrides[key] ?: defaults.settings[key])?.let { (it as? JsonPrimitive)?.intOrNull }
@@ -379,7 +390,11 @@ private fun ProviderSection(
         )
     }
 
-    if (entry == null || entry.needsKey) {
+    if (entry?.auth == "oauth") {
+        SignInSection(app, settings, save)
+    }
+
+    if (entry == null || (entry.needsKey && entry.auth != "oauth")) {
         OutlinedTextField(
             value = key,
             onValueChange = { key = it; saved = false },
@@ -457,10 +472,10 @@ private fun ProviderSection(
     )
 
     Text(
-        "Signing in with a ChatGPT or Claude.ai subscription is not an option " +
-            "here, and cannot be: neither company offers a way for an app like " +
-            "this one to spend a chat subscription. These keys are billed per " +
-            "request on the provider's own account.",
+        "These are API keys, billed per request — a ChatGPT Plus or Claude.ai " +
+            "subscription does not cover them. Spending a subscription needs the " +
+            "provider's own signed client, which is a desktop program; see " +
+            "OAUTH.md in the repository.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -468,6 +483,167 @@ private fun ProviderSection(
 
 /** Matches DEFAULT_PROVIDER in src/common/providers.js — used only before the engine answers. */
 private const val DEFAULT_SERVICE = "deepseek"
+
+/**
+ * Signing in, rather than pasting a key.
+ *
+ * Five public values and two buttons. Nothing here is a secret — a client id is
+ * a public identifier and the URLs belong to whoever runs the server — so these
+ * live in ordinary settings, while the tokens the flow produces go into the
+ * keystore beside the API keys.
+ *
+ * The sign-in itself opens a Custom Tab on the provider's own site. This screen
+ * never sees a password, which is the reason to offer it at all.
+ */
+@Composable
+private fun SignInSection(
+    app: HighlightHelperApp,
+    settings: Settings?,
+    save: (JsonObject) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val stored = settings?.obj("oauth")
+
+    fun stored(field: String) = (stored?.get(field) as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+    var clientId by remember(stored) { mutableStateOf(stored("clientId")) }
+    var authUrl by remember(stored) { mutableStateOf(stored("authUrl")) }
+    var tokenUrl by remember(stored) { mutableStateOf(stored("tokenUrl")) }
+    var scopeValue by remember(stored) { mutableStateOf(stored("scope")) }
+    var audience by remember(stored) { mutableStateOf(stored("audience")) }
+
+    var status by remember { mutableStateOf(app.oauth.describe("oauth")) }
+    var busy by remember { mutableStateOf(false) }
+
+    val persist = {
+        save(buildJsonObject {
+            put("oauth", buildJsonObject {
+                put("clientId", clientId.trim())
+                put("authUrl", authUrl.trim())
+                put("tokenUrl", tokenUrl.trim())
+                put("scope", scopeValue.trim())
+                put("audience", audience.trim())
+            })
+        })
+    }
+
+    OutlinedTextField(
+        value = clientId,
+        onValueChange = { clientId = it },
+        label = { Text("Client ID") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        "Issued to you by whoever runs the sign-in server. There is no client " +
+            "secret: a secret shipped inside an installable app would not be one.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    OutlinedTextField(
+        value = authUrl,
+        onValueChange = { authUrl = it },
+        label = { Text("Authorization URL") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    OutlinedTextField(
+        value = tokenUrl,
+        onValueChange = { tokenUrl = it },
+        label = { Text("Token URL") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    OutlinedTextField(
+        value = scopeValue,
+        onValueChange = { scopeValue = it },
+        label = { Text("Scope") },
+        placeholder = { Text("openid profile offline_access") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        "Include whatever your server wants for a refresh token — usually " +
+            "offline_access. Without one you are signed out when the token expires.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    OutlinedTextField(
+        value = audience,
+        onValueChange = { audience = it },
+        label = { Text("Audience (optional)") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    /*
+     * Shown rather than assumed. This exact string has to be on the server's
+     * allow-list or the sign-in fails at the very last step, with an error that
+     * comes from the server and mentions nothing this app controls.
+     */
+    Text(
+        "Redirect URI to register: ${OAuthService.REDIRECT_URI}",
+        style = MaterialTheme.typography.bodySmall
+    )
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            enabled = !busy && clientId.isNotBlank() && authUrl.isNotBlank() && tokenUrl.isNotBlank(),
+            onClick = {
+                // Saved first, so the flow reads the same values that are on
+                // screen — a client id typed but not stored would fail in a way
+                // that points at the server rather than at the form.
+                persist()
+                busy = true
+                status = "Opening the sign-in page…"
+                scope.launch {
+                    status = try {
+                        app.oauth.signIn(
+                            "oauth",
+                            OAuthService.Config(
+                                clientId = clientId.trim(),
+                                authUrl = authUrl.trim(),
+                                tokenUrl = tokenUrl.trim(),
+                                scope = scopeValue.trim(),
+                                audience = audience.trim()
+                            )
+                        )
+                        app.oauth.describe("oauth")
+                    } catch (err: Throwable) {
+                        err.message ?: "Sign-in failed."
+                    }
+                    busy = false
+                }
+            }
+        ) { Text("Sign in") }
+
+        OutlinedButton(onClick = {
+            persist()
+        }) { Text("Save") }
+
+        TextButton(onClick = {
+            app.oauth.signOut("oauth")
+            status = app.oauth.describe("oauth")
+        }) { Text("Sign out") }
+
+        TextButton(onClick = {
+            clipboard.setText(AnnotatedString(OAuthService.REDIRECT_URI))
+        }) { Text("Copy URI") }
+    }
+
+    Text(
+        status,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
 
 @Composable
 private fun ConversionsSection(settings: Settings, save: (JsonObject) -> Unit) {

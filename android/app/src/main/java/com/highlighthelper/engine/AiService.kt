@@ -35,7 +35,10 @@ import java.util.concurrent.TimeUnit
  * formats, and the credential — which is the one thing that must NOT cross into
  * the WebView, and so is the one thing the engine never sends.
  */
-class AiService(private val secrets: SecureStore) {
+class AiService(
+    private val secrets: SecureStore,
+    private val oauth: OAuthService
+) {
 
     private val http = OkHttpClient.Builder()
         .callTimeout(120, TimeUnit.SECONDS)
@@ -58,7 +61,9 @@ class AiService(private val secrets: SecureStore) {
         val api: String,
         val endpoint: String,
         val model: String,
-        val needsKey: Boolean
+        val needsKey: Boolean,
+        val auth: String,
+        val oauth: OAuthService.Config
     )
 
     private fun targetFor(request: JsonObject): Target {
@@ -69,8 +74,34 @@ class AiService(private val secrets: SecureStore) {
             api = p?.str("api") ?: "openai",
             endpoint = p?.str("endpoint")?.takeIf { it.isNotBlank() } ?: FALLBACK_ENDPOINT,
             model = p?.str("model")?.takeIf { it.isNotBlank() } ?: "deepseek-chat",
-            needsKey = p?.get("needsKey")?.jsonPrimitive?.booleanOrNull ?: true
+            needsKey = p?.get("needsKey")?.jsonPrimitive?.booleanOrNull ?: true,
+            auth = p?.str("auth") ?: "key",
+            oauth = OAuthService.Config.from(p?.get("oauth") as? JsonObject)
         )
+    }
+
+    /**
+     * The bearer credential, however it was obtained.
+     *
+     * A pasted key and a token from a sign-in end up in the same header, so the
+     * difference is confined here — which is also where an expired token is
+     * quietly renewed, so no caller has to remember to.
+     */
+    private suspend fun credentialFor(target: Target): String = when {
+        target.auth == "oauth" -> {
+            if (!target.oauth.ready) {
+                throw EngineException(
+                    "Sign-in is not configured yet: no ${target.oauth.missing.joinToString(", ")}."
+                )
+            }
+            oauth.accessToken(target.id, target.oauth)
+        }
+
+        !target.needsKey -> ""
+
+        else -> secrets.keyFor(target.id).also {
+            if (it.isEmpty()) throw EngineException(noKeyMessage(target.name))
+        }
     }
 
     /**
@@ -84,8 +115,7 @@ class AiService(private val secrets: SecureStore) {
     suspend fun complete(request: JsonObject, onChunk: ((String) -> Unit)?): JsonObject =
         withContext(Dispatchers.IO) {
             val target = targetFor(request)
-            val key = if (target.needsKey) secrets.keyFor(target.id) else ""
-            if (target.needsKey && key.isEmpty()) throw EngineException(noKeyMessage(target.name))
+            val key = credentialFor(target)
 
             val streaming = onChunk != null
             val call = Request.Builder()

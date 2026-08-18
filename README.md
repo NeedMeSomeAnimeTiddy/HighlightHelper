@@ -169,11 +169,23 @@ than any extension ships. Leaving the field blank uses the service's own default
 which is also what makes switching service safe: a `deepseek-chat` left pointed
 at OpenAI would 404 in a way that reads like a broken extension.
 
-**No "Sign in with ChatGPT".** Neither OpenAI nor Anthropic offers a way for a
-third-party app to spend a ChatGPT or Claude.ai *subscription*; the community
-projects that appear to do it work by reusing OpenAI's own first-party client
-credentials, which is against their terms and risks the user's account. The keys
-above are API keys, billed per request on a separate balance.
+There is also **Sign in instead (OAuth 2.0)** for an endpoint that sits behind an
+identity provider rather than an API key — a company gateway behind Entra ID or
+Okta, an Azure OpenAI deployment, a proxy with OIDC in front of it. Authorization
+code with PKCE, no client secret, tokens refreshed automatically and stored where
+the API keys are. It needs a client ID issued to you; see **[OAUTH.md](OAUTH.md)**.
+
+**The keys above are API keys, billed per request — a ChatGPT Plus or Claude.ai
+subscription does not cover them.** There is no OAuth client this app could
+register that would change that: OpenAI's platform API has no `/oauth/authorize`,
+and the OAuth they document for plugins and Actions runs the other direction,
+with ChatGPT as the client authenticating into *your* service.
+
+Spending a ChatGPT subscription is possible by a different route — driving the
+real Codex CLI, which OpenAI signs and the user logs into themselves, so no
+client ID is impersonated. It needs a native messaging host on desktop and has
+no Android story, and it is **not built**; see [OAUTH.md](OAUTH.md) and
+[ROADMAP.md](ROADMAP.md).
 
 **Where keys live:** `chrome.storage.local`, on this machine only, one per
 service so switching back doesn't mean finding a key again. Deliberately *not*

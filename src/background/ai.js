@@ -17,11 +17,13 @@ import {
   buildBody,
   describeHttpError,
   headersFor,
+  oauthReady,
   providerById,
   readAnswer,
   readDelta,
   resolveProvider
 } from '../common/providers.js';
+import { accessToken } from './signin.js';
 
 const TIMEOUT_MS = 30000;
 
@@ -36,12 +38,36 @@ const TIMEOUT_MS = 30000;
 async function prepare(options = {}) {
   const settings = await getSettings();
   const provider = resolveProvider(settings, options);
-  const key = provider.needsKey ? await getApiKey(provider.id) : '';
 
-  if (provider.needsKey && !key) throw new Error(ERR.NO_KEY);
   if (!provider.endpoint) throw new Error('No endpoint set for this provider. Check settings.');
 
-  return { provider, key };
+  return { provider, key: await credentialFor(provider) };
+}
+
+/**
+ * The bearer credential, however it was obtained.
+ *
+ * A pasted key and a token from a sign-in end up in the same header, so the
+ * difference is confined to this function — which is also where an expired
+ * token is quietly renewed. Callers never see the distinction, and no caller
+ * has to remember to refresh.
+ */
+async function credentialFor(provider) {
+  if (provider.auth === 'oauth') {
+    const ready = oauthReady(provider.oauth);
+    if (!ready.ok) {
+      throw new Error(`Sign-in is not configured yet: no ${ready.missing.join(', ')}.`);
+    }
+    // Throws NOT_SIGNED_IN, which the panel turns into a "sign in" prompt
+    // rather than a "paste a key" one.
+    return accessToken(provider.id, provider.oauth);
+  }
+
+  if (!provider.needsKey) return '';
+
+  const key = await getApiKey(provider.id);
+  if (!key) throw new Error(ERR.NO_KEY);
+  return key;
 }
 
 /** Provider-specific status handling, then the sentinel codes the UI knows. */

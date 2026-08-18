@@ -624,7 +624,11 @@ async function renderService() {
   $('endpointField').hidden = !entry.editableEndpoint;
   $('aiEndpoint').placeholder = entry.endpoint || 'https://…/v1/chat/completions';
 
-  $('keyField').hidden = entry.needsKey === false;
+  const signsIn = entry.auth === 'oauth';
+  $('oauthFields').hidden = !signsIn;
+  if (signsIn) await refreshSignInState();
+
+  $('keyField').hidden = entry.needsKey === false || signsIn;
   $('apiKey').placeholder = entry.keyHint || '';
   $('keyHint').textContent = entry.needsKey === false
     ? ''
@@ -643,11 +647,87 @@ async function renderService() {
   flash($('keyStatus'), saved ? 'A key is saved for this service.' : '', saved ? 'ok' : '');
 }
 
+/* ---------- signing in instead of pasting a key ---------- */
+
+/** The five OAuth inputs, by the settings key each one writes. */
+const OAUTH_FIELDS = {
+  clientId: 'oauthClientId',
+  authUrl: 'oauthAuthUrl',
+  tokenUrl: 'oauthTokenUrl',
+  scope: 'oauthScope',
+  audience: 'oauthAudience'
+};
+
+async function refreshSignInState() {
+  const res = await chrome.runtime.sendMessage({
+    type: MSG.SIGN_IN_STATE,
+    providerId: 'oauth'
+  });
+  $('signInStatus').textContent = res?.state || '';
+  $('signInStatus').className = /Not signed in/.test(res?.state || '') ? 'status' : 'status ok';
+  // Read from the worker rather than composed here: it is derived from the
+  // extension id, and the worker is the side that owns the identity API.
+  if (res?.redirectUri) $('redirectUri').value = res.redirectUri;
+}
+
+function wireSignIn() {
+  for (const [key, id] of Object.entries(OAUTH_FIELDS)) {
+    $(id).value = settings.oauth?.[key] || '';
+    // Saved per field rather than on a Save button: the sign-in reads these out
+    // of settings, so a client id typed but not saved would produce a failure
+    // whose cause is invisible.
+    $(id).addEventListener('change', () => persist({ oauth: { [key]: $(id).value.trim() } }));
+  }
+
+  $('copyRedirect').addEventListener('click', async () => {
+    await navigator.clipboard.writeText($('redirectUri').value);
+    flash($('signInStatus'), 'Redirect URI copied.', 'ok');
+  });
+
+  $('signIn').addEventListener('click', async () => {
+    /*
+     * Three origins are involved and only two need permission. The sign-in
+     * window itself is a browser window on the provider's own site, so it needs
+     * none; the token exchange and the chat requests are `fetch` from the
+     * worker, so they do. Asked for here because a permission request must ride
+     * on a click, and this is the click.
+     */
+    const tokenUrl = $('oauthTokenUrl').value.trim();
+    if (!tokenUrl) {
+      flash($('signInStatus'), 'Fill in the token URL first.', 'bad');
+      return;
+    }
+    if (!(await ensureOrigin(tokenUrl))) {
+      flash($('signInStatus'), 'Sign-in needs permission to reach the token URL.', 'bad');
+      return;
+    }
+    const endpoint = $('aiEndpoint').value.trim();
+    if (endpoint && !(await ensureOrigin(endpoint))) {
+      flash($('signInStatus'), 'Answers need permission to reach the endpoint.', 'bad');
+      return;
+    }
+
+    flash($('signInStatus'), 'Opening the sign-in window…');
+    const res = await chrome.runtime.sendMessage({ type: MSG.SIGN_IN, providerId: 'oauth' });
+    if (res?.ok) {
+      flash($('signInStatus'), res.state, 'ok');
+    } else {
+      flash($('signInStatus'), res?.error || 'Sign-in failed.', 'bad');
+    }
+  });
+
+  $('signOut').addEventListener('click', async () => {
+    const res = await chrome.runtime.sendMessage({ type: MSG.SIGN_OUT, providerId: 'oauth' });
+    flash($('signInStatus'), res?.state || 'Signed out.', '');
+  });
+}
+
 async function wireService() {
   fillSelect($('aiService'), PROVIDERS.map((p) => [p.id, p.name]));
   $('aiService').value = settings.aiService || DEFAULT_PROVIDER;
   $('aiEndpoint').value = settings.aiEndpoint || '';
   $('model').value = settings.model || '';
+  wireSignIn();
   await renderService();
 
   $('aiService').addEventListener('change', async (e) => {
