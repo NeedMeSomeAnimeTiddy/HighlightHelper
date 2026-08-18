@@ -95,6 +95,18 @@ globalThis.AndroidHost = {
         updated: Date.parse('2026-08-12T00:00:00Z'),
         stale: false
       };
+    } else if (message.type === 'store') {
+      // Stands in for KeyValueStore, with the same contract chrome.storage
+      // has: get answers with an object keyed by what was asked for.
+      if (message.op === 'get') {
+        reply = message.key in fakeStore ? { [message.key]: fakeStore[message.key] } : {};
+      } else {
+        for (const [k, v] of Object.entries(message.patch || {})) {
+          if (v === null) delete fakeStore[k];
+          else fakeStore[k] = v;
+        }
+        reply = {};
+      }
     } else if (message.type === 'http') {
       // Stands in for OkHttp. The shape is what the real HttpService returns:
       // a status the lookup modules read directly, and a body they parse.
@@ -122,6 +134,7 @@ const WIKI_SUMMARY = {
 };
 
 const hostCalls = [];
+const fakeStore = {};
 
 // pathToFileURL, because a Windows absolute path is not a URL the ESM loader
 // will take — "c:" reads as a protocol.
@@ -448,6 +461,117 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
     : await call('runView', { session, view: view.view });
   check('read aloud crosses as text to say',
     Boolean(blocks.find((b) => b.type === 'speech')?.text), true);
+}
+
+/*
+ * History, kept by the extension's own module.
+ *
+ * `history.js` runs unmodified against a storage shim, so what is being
+ * checked is that its rules survive the arrangement — particularly the one
+ * worth having: running the same tool on the same text again replaces the
+ * entry rather than stacking a near-duplicate, because a history that is
+ * ninety percent one repeated lookup is no history at all.
+ */
+{
+  // Every AI call earlier in this file was recorded too — which is the feature
+  // working, not a leak — so start from a known state rather than assuming one.
+  await call('clearHistory');
+  check('history starts empty once cleared', (await call('history')).length, 0);
+
+  const { session } = await call('detect', { text: 'SLA' });
+  const view = await call('openRow', { session, key: 'explain' });
+  await call('runView', { session, view: view.view });
+
+  const after = await call('history');
+  check('an answer is remembered', after.length, 1);
+  check('with the selection it was asked about', after[0].source, 'SLA');
+  check('and the answer itself', after[0].text, 'A stubbed answer, with **bold** and `code` in it.');
+  check('stamped with a time', typeof after[0].at, 'number');
+
+  // The same tool on the same text again — one entry, not two.
+  const again = await call('openRow', { session, key: 'explain' });
+  await call('runView', { session, view: again.view });
+  check('asking the same thing twice does not stack',
+    (await call('history')).length, 1);
+
+  // A different selection is a different entry.
+  const other = await call('detect', { text: 'CI/CD' });
+  const otherView = await call('openRow', { session: other.session, key: 'explain' });
+  await call('runView', { session: other.session, view: otherView.view });
+  const two = await call('history');
+  check('a different selection is its own entry', two.length, 2);
+  check('and the newest is first', two[0].source, 'CI/CD');
+
+  check('clearing reports what it removed', await call('clearHistory'), 2);
+  check('and it is gone', (await call('history')).length, 0);
+
+  // The history screen names an action; the wording comes from the same list
+  // the right-click menu is built from rather than from a second set of names.
+  const titles = await call('actionTitles');
+  check('an action has a real name, not a title-cased id',
+    [titles.fix, titles.keypoints, titles['comment-code']],
+    ['Fix spelling & grammar', 'Key points', 'Add comments to this code']);
+}
+
+/*
+ * "What is this about" is the model being asked so Wikipedia can be searched,
+ * not something anyone requested — so it must not appear in the history.
+ */
+{
+  await call('clearHistory');
+  const { session } = await call('detect', {
+    text: 'The committee met on Tuesday to review the quarterly figures. '.repeat(6)
+  });
+  const view = await call('openRow', { session, key: 'summarize' });
+  const blocks = await call('runView', { session, view: view.view });
+  await call('runBlocks', { session, action: blocks.find((b) => b.type === 'disclosure').action });
+
+  const actions = (await call('history')).map((h) => h.action);
+  check('the summary is remembered', actions.includes('summarize'), true);
+  check('the topic lookup behind it is not', actions.includes('topics'), false);
+  await call('clearHistory');
+}
+
+/*
+ * The setting is honoured on the engine's side, so no caller has to remember.
+ */
+{
+  const { session } = await call('detect', { text: 'SLA', settings: { keepHistory: false } });
+  const view = await call('openRow', { session, key: 'explain' });
+  await call('runView', { session, view: view.view });
+  check('history switched off records nothing', (await call('history')).length, 0);
+}
+
+/*
+ * A tool the user wrote.
+ *
+ * The detector has always worked on the phone; until the editor there was no
+ * way to put one in settings, so nothing exercised the path. What matters is
+ * that a tool written on this platform becomes a row keyed the way the rest of
+ * the app expects, and that its prompt is what actually reaches the model.
+ */
+{
+  const tools = [{ id: 'ab12-cd', name: 'Explain simply', prompt: 'Explain simply in {lang}.' }];
+  const { session, rows } = await call('detect', {
+    text: 'The committee reviewed the quarterly figures and found them consistent.',
+    settings: { customTools: tools }
+  });
+
+  const row = rows.find((r) => r.key.startsWith('custom'));
+  check('a user-written tool becomes a row', row.label, 'Explain simply');
+  check('keyed by its id', row.key, 'custom:ab12-cd');
+
+  hostCalls.length = 0;
+  const view = await call('openRow', { session, key: 'custom:ab12-cd' });
+  await call('runView', { session, view: view.view });
+
+  const ai = hostCalls.find((c) => c.type === 'ai');
+  check("the user's own prompt is what is sent",
+    ai.system.includes('Explain simply in'), true);
+  // {lang} resolved; {title} and {url} would fill empty here, because an
+  // intent carries a string and no page.
+  check('and its placeholders were filled',
+    ai.system.includes('{lang}'), false);
 }
 
 /* ---------- report ---------- */

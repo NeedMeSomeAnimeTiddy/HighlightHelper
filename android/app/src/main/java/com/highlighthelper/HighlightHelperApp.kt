@@ -3,9 +3,14 @@ package com.highlighthelper
 import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.webkit.WebView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import com.highlighthelper.engine.DeepSeekService
 import com.highlighthelper.engine.DetectorEngine
+import com.highlighthelper.engine.HostServices
 import com.highlighthelper.engine.HttpService
+import com.highlighthelper.engine.KeyValueStore
 import com.highlighthelper.engine.RatesService
 import com.highlighthelper.engine.ResponseCache
 import com.highlighthelper.engine.SecureStore
@@ -33,9 +38,35 @@ class HighlightHelperApp : Application() {
     val deepSeek: DeepSeekService by lazy { DeepSeekService(secrets) }
     val settings: SettingsStore by lazy { SettingsStore(this) }
     val cache: ResponseCache by lazy { ResponseCache(this) }
+    val store: KeyValueStore by lazy { KeyValueStore(this) }
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    /**
+     * The services the engine talks to when no sheet is open.
+     *
+     * The settings and history screens ask the engine things too, and a request
+     * it makes with nothing bound simply never gets an answer. A selection
+     * sheet rebinds this to its own instance while it is up, because only a
+     * sheet can put text back into the app it came from — this one refuses to,
+     * which is correct rather than a limitation: there is nothing to replace.
+     */
+    val services: HostServices by lazy {
+        HostServices(
+            context = this,
+            scope = appScope,
+            rates = rates,
+            deepSeek = deepSeek,
+            http = http,
+            cache = cache,
+            store = store,
+            onReplace = { false }
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
+        engine.services = services
 
         /*
          * Makes the engine's WebView visible to desktop Chrome at

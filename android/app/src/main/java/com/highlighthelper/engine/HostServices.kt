@@ -44,6 +44,7 @@ class HostServices(
     private val deepSeek: DeepSeekService,
     private val http: HttpService,
     private val cache: ResponseCache,
+    private val store: KeyValueStore,
     /** From the user's `cacheDays`; zero switches caching off entirely. */
     private val cacheTtlMs: Long = ResponseCache.DEFAULT_TTL_MS,
     /** Set when the selection came from an editable field — see ProcessTextActivity. */
@@ -96,6 +97,13 @@ class HostServices(
              * out from the WebView, so there is one place where this app
              * talks to the network.
              */
+            // The engine's chrome.storage.local shim — see KeyValueStore.
+            "store" -> when (message["op"]?.jsonPrimitive?.contentOrNull) {
+                "get" -> store.get(message["key"]?.jsonPrimitive?.contentOrNull.orEmpty())
+                "set" -> store.set(message["patch"] as? JsonObject ?: JsonObject(emptyMap()))
+                else -> throw EngineException("Unknown storage operation")
+            }
+
             "http" -> {
                 val url = message["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
                 val key = ResponseCache.keyFor("http", url)

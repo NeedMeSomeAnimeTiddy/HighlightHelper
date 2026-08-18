@@ -28,6 +28,9 @@ import { buildPrompt, cleanOutput } from './src/common/prompts.js';
 import { lookup, searchLinks, wikiLang } from './src/background/wikipedia.js';
 import { define, synonyms, dictionaryLinks, wiktLang } from './src/background/dictionary.js';
 import { parseMarkup } from './src/content/kit.js';
+import { readHistory, remember, clearHistory } from './src/common/history.js';
+import { CONTEXT_TOOLS } from './src/common/tools.js';
+import { AI } from './src/common/constants.js';
 import { LANGUAGES } from './src/common/languages.js';
 import { CURRENCY_CODES, currencyName } from './src/common/currencies.js';
 
@@ -76,6 +79,31 @@ window.fetch = async (url) => {
     json: async () => JSON.parse(res.body || 'null'),
     text: async () => res.body || ''
   };
+};
+
+/**
+ * `chrome.storage.local`, backed by a file Kotlin owns.
+ *
+ * `src/common/history.js` is the reason this exists. What is worth keeping
+ * about it is not the storage but the rules — truncate a long selection
+ * because the point is recognition rather than archive, replace an entry when
+ * the same tool is run on the same text rather than stacking a near-duplicate,
+ * cap the list, newest first. Reimplementing those in Kotlin would be writing
+ * the interesting half again; giving it somewhere to put things runs it as it
+ * stands.
+ *
+ * Only the three methods it actually calls. This is not an attempt at the
+ * extension API — anything reaching for more of `chrome` on this side is code
+ * that should not have been copied in.
+ */
+globalThis.chrome = {
+  storage: {
+    local: {
+      get: async (key) => hostRequest({ type: 'store', op: 'get', key: String(key) }),
+      set: async (patch) => hostRequest({ type: 'store', op: 'set', patch }),
+      remove: async (key) => hostRequest({ type: 'store', op: 'set', patch: { [key]: null } })
+    }
+  }
 };
 
 /** Kotlin's answer to hostRequest, called back in by evaluateJavascript. */
@@ -183,7 +211,25 @@ function apiFor(s) {
         model: merged.model || s.settings.model,
         stream: Boolean(onChunk)
       });
-      return { ok: true, text: cleanOutput(res.text || ''), cached: Boolean(res.cached) };
+      const answer = cleanOutput(res.text || '');
+
+      /*
+       * Recorded here rather than in Kotlin, for the same reason the prompt is
+       * built here: the worker does it at exactly this point in the extension,
+       * so both platforms keep the same history under the same rules. It
+       * honours its setting on this side too, so no caller has to remember to
+       * check — and it is deliberately not awaited, because failing to write a
+       * history entry must never cost the answer the user is waiting for.
+       */
+      // TOPICS is excluded on purpose: it is the model being asked what a
+      // passage is about so that Wikipedia can be searched for it, not
+      // something anyone requested. Recording it would fill the history with
+      // entries for a step the user never saw.
+      if (s.settings.keepHistory !== false && action !== AI.TOPICS) {
+        remember({ action, source: text, text: answer }).catch(() => {});
+      }
+
+      return { ok: true, text: answer, cached: Boolean(res.cached) };
     },
 
     async chat(messages, onChunk = null) {
@@ -555,6 +601,54 @@ const METHODS = {
         messages.pop();
         throw err;
       });
+  },
+
+  /** The recent answers, newest first. */
+  history() {
+    return readHistory();
+  },
+
+  /**
+   * Human wording for the AI action ids a history entry carries.
+   *
+   * The good phrasing already exists — "Fix spelling & grammar", "Key points",
+   * "Add comments to this code" — in `CONTEXT_TOOLS`, which the right-click
+   * menu is built from. It is keyed by *tool* id rather than by AI action, and
+   * those agree for most of them; the two that do not are mapped here rather
+   * than reworded, because the alternative is a second set of names for the
+   * same operations that can disagree with the menu.
+   *
+   * Without this Kotlin can only title-case the id, which turns
+   * "comment-code" into "Comment code" and "keypoints" into "Keypoints".
+   */
+  actionTitles() {
+    const titles = {};
+    const walk = (items) => {
+      for (const item of items) {
+        if (item.type === 'separator') continue;
+        if (item.id && item.title && !item.grouping) {
+          // A tone lives at `rewrite:fix` and records as `fix`; the trailing
+          // segment is the action for every nested row that has one.
+          titles[item.id.split(':').pop()] = item.title;
+          titles[item.id] = item.title;
+        }
+        if (Array.isArray(item.children)) walk(item.children);
+      }
+    };
+    walk(CONTEXT_TOOLS);
+
+    // `code` is the tool and `explain-code` is the action it sends; the
+    // comment row is `code:comment` against `comment-code`. Nothing derives
+    // one from the other, so the two are stated.
+    titles[AI.EXPLAIN_CODE] = titles.code || 'Explain this code';
+    titles[AI.COMMENT_CODE] = titles.comment || 'Add comments to this code';
+    titles[AI.CUSTOM] = 'My tools';
+
+    return titles;
+  },
+
+  clearHistory() {
+    return clearHistory();
   },
 
   /** Lets Kotlin ask what a detector is called without hard-coding the list. */

@@ -432,18 +432,30 @@ go to DeepSeek with the answer streaming in as it is written. Follow-up question
 "Find a source" with its disambiguation picker, the language switcher and read-aloud all
 work natively.
 
+Settings, custom tools and history all exist: preferences reach the detectors, tools can be
+written on the phone, and the last sixty answers are kept under `history.js`'s own rules —
+that module runs unmodified against a `chrome.storage.local` shim, so the truncation, the
+cap and the rule that re-running a tool replaces its entry rather than stacking a
+near-duplicate are the extension's, not a second implementation.
+
 What is missing, in the order it will be noticed:
 
-- **Custom tools cannot be created on the phone.** The detector runs them, and the
-  settings screen has nowhere to write one — that needs a prompt editor, which is a
-  screen rather than a row.
 - **Highlighting is absent and always will be** in this shape. It paints a range into
-  the document it came from, and an intent carries a string with no document. The
-  clippings library in B4 is the honest substitute.
+  the document it came from, and an intent carries a string with no document. A clippings
+  library — save the quote with whatever provenance the intent carries — is the honest
+  substitute and is not built.
 - **No on-device model.** Every AI call goes to DeepSeek, so the desktop promise that a
   selection can stay on the machine has no equivalent here yet. ML Kit GenAI is the
   route; see the provider table above.
-- **No history or library**, so nothing is kept after the sheet closes.
+- **History cannot tell your own tools apart.** Every user-written tool records
+  `action: 'custom'`, because that is the action `custom.js` sends, so they all share one
+  label. Fixing it means recording the tool's id alongside the action — a change to
+  `history.js` and `custom.js`, which would improve the extension equally.
+- **Truncation is invisible.** `history.js` clips a source at 300 characters and an
+  answer at 2000 and marks neither, so an entry can end mid-sentence with nothing saying
+  why.
+- **Per-app enable/disable** is unbuilt. The calling package is available and unused;
+  it is the natural analogue of `disabledSites`.
 
 **B0 before B1 is the load-bearing ordering.** It is tempting to skip it and let the Android
 app read `matches()` directly — that is Option 2 by the back door, and the drift starts on day

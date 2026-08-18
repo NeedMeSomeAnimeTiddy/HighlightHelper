@@ -18,8 +18,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.highlighthelper.ui.CustomToolsScreen
+import com.highlighthelper.ui.HistoryRow
 import com.highlighthelper.ui.LoadingRow
 import com.highlighthelper.ui.Note
+import com.highlighthelper.ui.customToolsFrom
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 import kotlin.math.roundToInt
@@ -40,8 +43,8 @@ import kotlin.math.roundToInt
  * and the engine's default otherwise, and a setting the user has never touched
  * keeps tracking the default when the default moves.
  *
- * `customTools` is deliberately absent — it needs a prompt editor, which is a
- * screen rather than a row.
+ * `customTools` is the one setting that is not a row: it needs a prompt editor,
+ * so it is a row that opens [CustomToolsScreen] instead.
  */
 class MainActivity : ComponentActivity() {
 
@@ -122,6 +125,17 @@ private class Settings(private val overrides: JsonObject, val defaults: EngineDe
         (overrides[key] ?: defaults.settings[key])?.let { (it as? JsonPrimitive)?.intOrNull }
             ?: fallback
 
+    /**
+     * A list-valued setting, read the same two ways round as the scalars.
+     *
+     * There is no third lookup and no literal empty list standing in for a
+     * default the engine already publishes — `customTools: []` is declared in
+     * `src/common/settings.js`, and an empty array here means the engine sent
+     * something that was not a list at all.
+     */
+    fun array(key: String): JsonArray =
+        (overrides[key] ?: defaults.settings[key])?.jsonArrayOrNull() ?: JsonArray(emptyList())
+
     fun detectorOn(id: String): Boolean =
         overrides["detectors"]?.jsonObjectOrNull()?.get(id)?.jsonPrimitive?.booleanOrNull
             ?: defaults.defaultFor(id)
@@ -155,6 +169,29 @@ private fun SettingsScreen(app: HighlightHelperApp) {
 
     val save: (JsonObject) -> Unit = { patch -> scope.launch { app.settings.update(patch) } }
 
+    val defaults = loaded?.getOrNull()
+    val current = overrides
+    val settings = if (defaults != null && current != null) Settings(current, defaults) else null
+
+    /*
+     * Which of the two screens is up. A boolean rather than a navigation
+     * library or a second Activity: there is one destination, it is reached
+     * from one row, and everything it needs is already resolved here. Keeping
+     * it inside this composable also means coming back is free — leaving for an
+     * Activity of its own would tear this one down and pay for the engine's
+     * `defaults` call again on the way back.
+     */
+    var editingTools by remember { mutableStateOf(false) }
+
+    if (editingTools && settings != null) {
+        CustomToolsScreen(
+            tools = customToolsFrom(settings.array("customTools")),
+            save = save,
+            onBack = { editingTools = false }
+        )
+        return
+    }
+
     Column(
         Modifier
             .verticalScroll(rememberScrollState())
@@ -173,8 +210,6 @@ private fun SettingsScreen(app: HighlightHelperApp) {
 
         ApiKeySection(app)
 
-        val defaults = loaded?.getOrNull()
-        val current = overrides
         when {
             loaded?.isFailure == true -> {
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -186,12 +221,10 @@ private fun SettingsScreen(app: HighlightHelperApp) {
                 )
             }
 
-            defaults == null || current == null ->
+            settings == null ->
                 LoadingRow("Reading the defaults from the engine…")
 
             else -> {
-                val settings = Settings(current, defaults)
-
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 ConversionsSection(settings, save)
 
@@ -202,7 +235,19 @@ private fun SettingsScreen(app: HighlightHelperApp) {
                 DetectorsSection(settings, save)
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                CustomToolsRow(customToolsFrom(settings.array("customTools")).size) {
+                    editingTools = true
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 StorageSection(app, settings, save)
+
+                // Next to storage because that is what it is — the other thing
+                // this app keeps on the device, and the more personal of the
+                // two. The row carries its own screen, so nothing about the
+                // history is decided here.
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                HistoryRow(app)
             }
         }
     }
@@ -344,6 +389,44 @@ private fun DetectorsSection(settings: Settings, save: (JsonObject) -> Unit) {
                         put("detectors", buildJsonObject { put(id, next) })
                     })
                 }
+            )
+        }
+    }
+}
+
+/**
+ * The way into the prompt editor.
+ *
+ * It counts what is stored rather than saying "Custom tools ›", because the
+ * number is the one thing the settings screen can usefully tell someone about
+ * a list it does not show: none means the `custom` detector never matches at
+ * all, which explains an absence the detector list above cannot.
+ */
+@Composable
+private fun CustomToolsRow(count: Int, onOpen: () -> Unit) {
+    SectionHeader(
+        "My tools",
+        "Your own prompts, offered as rows in the sheet — for the thing the " +
+            "built-in tools do not do."
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable { onOpen() }
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Write and edit tools", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                when (count) {
+                    0 -> "None yet"
+                    1 -> "1 tool"
+                    else -> "$count tools"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

@@ -41,6 +41,7 @@ class ShareActivity : ComponentActivity() {
             deepSeek = app.deepSeek,
             http = app.http,
             cache = app.cache,
+            store = app.store,
             onReplace = { false }
         )
 
