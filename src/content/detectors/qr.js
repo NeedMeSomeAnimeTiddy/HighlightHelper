@@ -6,8 +6,7 @@
  * offered near the bottom of the menu.
  */
 
-import { el, replaceContent, copyButton, note } from '../kit.js';
-import { encode, toSvgElement, maxBytes } from '../qr.js';
+import { encode, maxBytes } from '../qr.js';
 import { looksLikeLanguage } from '../../common/text.js';
 
 const MAX_CHARS = 400;
@@ -69,51 +68,36 @@ export default {
       icon: 'qr',
       label: match.kind === 'link' ? 'QR code for this link' : 'QR code',
       detailTitle: 'QR code',
+      /*
+       * An async view rather than a static one, for the encoding rather than
+       * for any network call. rows() runs for every selection that matches,
+       * and Reed-Solomon over a few hundred bytes is real work to do just to
+       * fill in a menu nobody has clicked yet — so the matrix is built on the
+       * drill-in, as it always was, and that is also where a failure to encode
+       * can still be shown as a message.
+       */
       detail: {
-        kind: 'blocks',
-        blocks: [{
-          /*
-           * A matrix of black and white squares, and nothing in the block
-           * vocabulary draws one. There is no image or bitmap block, and
-           * inventing one for the single view that needs it would be a block
-           * type the other twenty never use.
-           *
-           * Encoding stays inside `render` on purpose. rows() runs for every
-           * selection that matches, and Reed-Solomon over a few hundred bytes
-           * is real work to do just to fill in a menu nobody has clicked yet —
-           * so the code is built on the drill-in, as it always was, and that is
-           * also where a failure to encode can still be shown as a message.
-           */
-          type: 'custom',
-          note: 'A QR code is an image, so it needs the browser panel to draw it.',
-          render: (api) => detailView(text.trim(), api)
-        }]
+        kind: 'async',
+        run: async () => qrBlocks(text.trim())
       }
     }];
   }
 };
 
-/**
- * The container is plain: the panel's own `hh-detail` wrapper is around this
- * block already, and a second one would pad the view twice.
- */
-function detailView(text, api) {
-  const box = el('div', {});
-
+/** The matrix, what it is, and the text it stands for. */
+function qrBlocks(text) {
   let result;
   try {
     result = encode(text);
   } catch (err) {
-    replaceContent(box, note(String(err.message || err), 'hh-warn'));
-    return box;
+    return [{ type: 'note', text: String(err.message || err), variant: 'hh-warn' }];
   }
 
-  const frame = el('div', { class: 'hh-qr' }, toSvgElement(result.modules));
-
-  replaceContent(box,
-    frame,
-    el('p', { class: 'hh-sub', text: `Version ${result.version} · ${result.size}×${result.size} modules · error correction M` }),
-    el('div', { class: 'hh-row' }, copyButton(text, api))
-  );
-  return box;
+  return [
+    // The modules, not a drawing of them: each platform draws a grid of squares
+    // the way it draws things, and the grid is smaller than the markup.
+    { type: 'qrcode', modules: result.modules },
+    { type: 'sub', text: `Version ${result.version} · ${result.size}×${result.size} modules · error correction M` },
+    { type: 'buttons', items: [{ copy: text }] }
+  ];
 }

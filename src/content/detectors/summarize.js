@@ -8,9 +8,9 @@
  * Both cost a DeepSeek call, so nothing runs until a row is picked.
  */
 
-import { el, streamView, actionRow, topicSourceButton, provenance, followUp, textBlock }
-  from '../kit.js';
+import { provenance, lookupBlocks } from '../kit.js';
 import { AI } from '../../common/constants.js';
+import { parseTopics } from '../../common/text.js';
 import { isCode } from './codelang.js';
 
 const MIN_CHARS = 280;
@@ -59,37 +59,47 @@ function streamed(text, action, busy, label) {
     done: (res) => [
       { type: 'label', text: `${label}${provenance(res)}` },
       { type: 'text', text: res.text, rich: true },
-      {
-        /*
-         * Copy/Replace, "Find a source" and the follow-up thread, kept together
-         * and kept as DOM.
-         *
-         * Not laziness about the block vocabulary: the source button appends
-         * itself *into* the actions row, and the follow-up is a live
-         * conversation that owns its own state across turns. Describing either
-         * as data would mean inventing blocks that only one view uses, and
-         * splitting them apart would move "Find a source" onto its own line —
-         * a real layout change to a shipped view, for no gain.
-         *
-         * Nothing is lost on Android by this today, because the AI path is not
-         * wired up there at all yet. When it is, this splits into a native
-         * actions block plus a real conversation view, and that is the right
-         * time to design one — not now, guessing.
-         */
-        type: 'custom',
-        note: 'Follow-up questions need the browser panel.',
-        render: (api) => {
-          const host = el('div', {});
-          const actions = actionRow(res.text, api);
-          host.append(actions);
-          // A paragraph has no encyclopedia title. The topics are derived from
-          // the original text rather than the summary, so nothing the model
-          // introduced while condensing can become a search term of its own.
-          topicSourceButton(text, api, actions, { context: res.text });
-          followUp({ source: text, answer: res.text }, api, host);
-          return host;
-        }
-      }
+      { type: 'actions', text: res.text },
+      // A paragraph has no encyclopedia title. The topics are derived from the
+      // original text rather than the summary, so nothing the model introduced
+      // while condensing can become a search term of its own.
+      topicSourceDisclosure(text, res.text),
+      { type: 'conversation', source: text, answer: res.text }
     ]
   };
 }
+
+/**
+ * "Find a source" for a selection with no obvious title.
+ *
+ * Searching Wikipedia for a whole paragraph returns noise, so the model is
+ * asked what the text is *about* first. That is the one thing it can do here
+ * without risk: it picks the search term, and Wikipedia decides whether such an
+ * article exists. An invented topic simply finds nothing.
+ *
+ * Only the first topic is looked up, so the common case costs one search rather
+ * than three — and none at all until the button is pressed.
+ */
+function topicSourceDisclosure(text, context) {
+  return {
+    type: 'disclosure',
+    label: 'Find a source',
+    icon: 'source',
+    busy: 'Working out what this is about…',
+    run: async (api) => {
+      const res = await api.ai(AI.TOPICS, text);
+      const topics = parseTopics(res.text);
+      if (!topics.length) {
+        return [{ type: 'note', text: 'Nothing here that an encyclopedia would have an article on.' }];
+      }
+      return [
+        { type: 'sub', text: `In this text: ${topics[0]}` },
+        ...(await lookupBlocks(api, topics[0], context))
+      ];
+    }
+  };
+}
+
+
+
+

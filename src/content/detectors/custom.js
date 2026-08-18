@@ -11,7 +11,7 @@
  * common/prompts.js for why the selection stays in its own turn.
  */
 
-import { el, provenance, followUp } from '../kit.js';
+import { provenance } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { fillTemplate } from '../../common/prompts.js';
 import { looksLikeLanguage } from '../../common/text.js';
@@ -85,35 +85,16 @@ function runDetail(text, tool, language) {
     kind: 'stream',
     loading: `${tool.name}…`,
     run: (api, emit) => api.ai(AI.CUSTOM, text, { systemPrompt: systemPromptFor(api) }, emit),
-    done: (res) => [
+    /*
+     * `done` is handed the api for the same reason `run` is: the tool's own
+     * prompt is the system turn the thread continues from, and filling the
+     * template needs the page the answer was asked about.
+     */
+    done: (res, api) => [
       { type: 'label', text: `${tool.name}${provenance(res)}` },
       { type: 'text', text: res.text, rich: true },
       { type: 'actions', text: res.text },
-      {
-        /*
-         * The follow-up thread, and only the follow-up thread.
-         *
-         * Copy/Replace above is an ordinary actions block; this one is not,
-         * because a conversation owns state across turns — the message list
-         * grows, a failed turn is rolled back off it, and the input is live.
-         * There is no way to describe that as static data, so it stays DOM.
-         *
-         * Nothing is lost on Android by this today, because the AI path is not
-         * wired up there at all yet. When it is, this becomes a real
-         * conversation view, and that is the right moment to design one.
-         */
-        type: 'custom',
-        note: 'Follow-up questions need the browser panel.',
-        render: (api) => {
-          const host = el('div', {});
-          followUp(
-            { system: systemPromptFor(api), source: text, answer: res.text },
-            api,
-            host
-          );
-          return host;
-        }
-      }
+      { type: 'conversation', system: systemPromptFor(api), source: text, answer: res.text }
     ]
   };
 }

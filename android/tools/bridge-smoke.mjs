@@ -57,6 +57,14 @@ let nextCall = 0;
 
 globalThis.window = globalThis;
 
+/*
+ * `speak` gates on the browser having speech synthesis, so without these it
+ * never produces a row and its assertions below cannot run. A WebView has both;
+ * Node has neither. The detector suite stubs them for the same reason.
+ */
+globalThis.speechSynthesis ??= { getVoices: () => [], cancel() {}, speak() {}, speaking: false };
+globalThis.SpeechSynthesisUtterance ??= function SpeechSynthesisUtterance() {};
+
 globalThis.AndroidHost = {
   ready: () => ready.resolve(),
   failed: (message) => ready.reject(new Error(message)),
@@ -338,6 +346,78 @@ const noFunctions = (value) => JSON.parse(JSON.stringify(value)) !== undefined;
     info.registry.length, 22);
   check('and the pickers get their lists',
     [info.languages.length > 5, info.currencies.length > 20], [true, true]);
+}
+
+/*
+ * The blocks that replaced the escape hatch.
+ *
+ * Eleven views used to tell the phone they needed the browser panel. They were
+ * three shapes repeated — deferred work, a conversation, and a picker — and
+ * what matters about each is not that it renders but that it keeps its bargain:
+ * a disclosure must not do its work until asked, and a conversation must
+ * survive more than one turn.
+ */
+{
+  const longText = 'The committee met on Tuesday to review the quarterly figures. '.repeat(6);
+  const { session } = await call('detect', { text: longText });
+  const view = await call('openRow', { session, key: 'summarize' });
+  const blocks = await call('runView', { session, view: view.view });
+
+  const kinds = blocks.map((b) => b.type);
+  check('a summary no longer needs the browser panel',
+    kinds.includes('unsupported'), false);
+
+  const disclosure = blocks.find((b) => b.type === 'disclosure');
+  const conversation = blocks.find((b) => b.type === 'conversation');
+
+  check('"Find a source" crosses as deferred work', Boolean(disclosure?.action), true);
+  check('and a follow-up thread crosses as a conversation',
+    Boolean(conversation?.chat), true);
+
+  // The point of a disclosure: the lookup has NOT happened yet.
+  hostCalls.length = 0;
+  check('a disclosure does nothing until it is opened', hostCalls.length, 0);
+
+  const opened = await call('runBlocks', { session, action: disclosure.action });
+  check('opening it returns blocks to draw', Array.isArray(opened), true);
+  check('and it did the work only then', hostCalls.length > 0, true);
+
+  // A conversation has to hold its history, or the second question arrives
+  // with no idea what the first one was about.
+  const first = await call('ask', { session, chat: conversation.chat, question: 'why?' });
+  const second = await call('ask', { session, chat: conversation.chat, question: 'and then?' });
+  check('a follow-up answers', first, 'A stubbed answer.');
+  check('and answers again on the same thread', second, 'A stubbed answer.');
+
+  const asked = hostCalls.filter((c) => c.type === 'chat');
+  check('the thread grows rather than restarting',
+    asked.at(-1).messages.length > asked[0].messages.length, true);
+}
+
+/* The QR grid, as data rather than as a drawing. */
+{
+  const { session } = await call('detect', { text: 'https://example.com' });
+  const view = await call('openRow', { session, key: 'qr' });
+  const blocks = view.kind === 'blocks'
+    ? view.blocks
+    : await call('runView', { session, view: view.view });
+
+  const qr = blocks.find((b) => b.type === 'qrcode');
+  check('a QR code crosses as its module grid', Boolean(qr), true);
+  check('the grid is square', qr.modules.length, qr.modules[0].length);
+  check('and it is ones and zeroes, not markup',
+    qr.modules.flat().every((m) => m === 0 || m === 1), true);
+}
+
+/* Read aloud: the text and the language, not a player. */
+{
+  const { session } = await call('detect', { text: 'Read this sentence aloud.' });
+  const view = await call('openRow', { session, key: 'speak' });
+  const blocks = view.kind === 'blocks'
+    ? view.blocks
+    : await call('runView', { session, view: view.view });
+  check('read aloud crosses as text to say',
+    Boolean(blocks.find((b) => b.type === 'speech')?.text), true);
 }
 
 /* ---------- report ---------- */

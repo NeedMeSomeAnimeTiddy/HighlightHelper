@@ -8,7 +8,7 @@
  * Costs a DeepSeek call, so nothing happens until the row is picked.
  */
 
-import { el, copyButton, sourceButton, provenance, followUp } from '../kit.js';
+import { provenance, lookupBlocks } from '../kit.js';
 import { AI } from '../../common/constants.js';
 import { letterRatio } from '../../common/text.js';
 
@@ -87,40 +87,33 @@ async function explainBlocks(term, api) {
 
   return [
     { type: 'text', text: res.text, rich: true },
-    {
-      /*
-       * Copy and "Find a source", kept together on one line and kept as DOM.
-       *
-       * Not laziness about the block vocabulary: the source button appends
-       * itself *into* the Copy row, so describing the two as separate blocks
-       * would put "Find a source" on a line of its own — a real layout change
-       * to a shipped view, for no gain. Android therefore loses the Copy button
-       * on this view too, which costs nothing today because the AI path is not
-       * wired up there at all yet.
-       */
-      type: 'custom',
-      note: '“Find a source” needs the browser panel.',
-      render: (api) => {
-        const actions = el('div', { class: 'hh-row' }, copyButton(res.text, api));
-        // DeepSeek has no web access and cannot cite anything, so this is a
-        // real encyclopedia lookup rather than a citation from the model. The
-        // explanation goes along as context: it describes the sense meant, and
-        // "SLA" alone finds the Symbionese Liberation Army first.
-        sourceButton(term, api, actions, { context: res.text });
-        return actions;
-      }
-    },
+    { type: 'buttons', items: [{ copy: res.text }] },
+    // DeepSeek has no web access and cannot cite anything, so this is a real
+    // encyclopedia lookup rather than a citation from the model. The
+    // explanation goes along as context: it describes the sense meant, and
+    // "SLA" alone finds the Symbionese Liberation Army first.
+    sourceDisclosure(term, res.text),
     ...(source ? [{ type: 'sub', text: source }] : []),
-    {
-      // The follow-up thread is a live conversation that owns its own state
-      // across turns, which is the other thing no block type describes.
-      type: 'custom',
-      note: 'Follow-up questions need the browser panel.',
-      render: (api) => {
-        const host = el('div', {});
-        followUp({ source: term, answer: res.text }, api, host);
-        return host;
-      }
-    }
+    { type: 'conversation', source: term, answer: res.text }
   ];
 }
+
+/**
+ * "Find a source" for a selection that already *is* the term.
+ *
+ * A lookup costs a request and most readers accept the explanation and move
+ * on, so it waits for the click rather than running because the view opened.
+ */
+function sourceDisclosure(term, context) {
+  return {
+    type: 'disclosure',
+    label: 'Find a source',
+    icon: 'source',
+    busy: `Looking up “${term}”…`,
+    run: (api) => lookupBlocks(api, term, context)
+  };
+}
+
+
+
+

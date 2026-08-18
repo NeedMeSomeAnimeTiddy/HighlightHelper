@@ -71,19 +71,32 @@
           return { ok: true, base: msg.base, stale: false,
                    updated: Date.parse('2026-08-12T00:00:00Z'),
                    rates: { USD: 1, EUR: 0.922, GBP: 0.79, JPY: 157.2, CAD: 1.37 } };
+        // The shape `define()` really returns — `definitions`, not `senses`.
+        // Worth stating: an invented stub shape is a fixture that tests the
+        // fixture, and this one hid a working view behind a fake error.
         case 'hh:define':
-          return { ok: true, cached: true, links: [{ label: 'Wiktionary', url: '#' }],
-                   entries: [{ partOfSpeech: 'noun', senses: [
+          return { ok: true, cached: true, lang: 'en',
+                   links: [{ label: 'Wiktionary', url: '#' }],
+                   entries: [{ partOfSpeech: 'noun', definitions: [
                      { text: 'The occurrence of events by chance in a happy way.',
                        example: 'a fortunate stroke of serendipity' }] }] };
         case 'hh:synonyms':
           return { ok: true, words: ['luck', 'fortune', 'chance'], cached: true };
+        // Two articles on purpose. An ambiguous term is the normal case, and
+        // the "did you mean" picker only appears when there is something to
+        // pick — a one-article fixture would never render the control.
         case 'hh:source':
           return { ok: true, cached: true, links: [{ label: 'Search', url: '#' }],
-                   articles: [{ title: 'Service-level agreement', lang: 'en',
-                                description: 'A commitment between a provider and a client',
-                                extract: 'A service-level agreement is a commitment between a service provider and a customer.',
-                                url: '#' }] };
+                   articles: [
+                     { title: 'Service-level agreement', lang: 'en',
+                       description: 'A commitment between a provider and a client',
+                       extract: 'A service-level agreement is a commitment between a service provider and a customer.',
+                       url: '#' },
+                     { title: 'Symbionese Liberation Army', lang: 'en',
+                       description: 'An American militant group',
+                       extract: 'The Symbionese Liberation Army was an American far-left militant organisation.',
+                       url: '#' }
+                   ] };
         default:
           return { ok: true };
       }

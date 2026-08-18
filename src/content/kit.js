@@ -9,6 +9,8 @@
 import { glyph } from './icons.js';
 import { MSG, AI } from '../common/constants.js';
 import { parseTopics } from '../common/text.js';
+import { toSvgElement } from './qr.js';
+import { speak, stopSpeaking, isSpeaking } from './speech.js';
 
 /** el('div', { class: 'x', onclick: fn }, child, 'text') */
 export function el(tag, props = {}, ...children) {
@@ -250,12 +252,132 @@ const BLOCKS = {
   menu: (b, api) => menu(b.rows, api),
 
   /**
-   * The escape hatch, and deliberately part of the contract rather than a gap
-   * in it. A few views are genuinely browser-shaped — the QR canvas, the
-   * "Find a source" panel — and forcing them into block types nothing else uses
-   * would make the vocabulary worse for the twenty views that fit it. Android
-   * skips a block it has no renderer for and says so, which is the honest
-   * outcome: a missing panel, not a crash.
+   * A button that becomes a panel.
+   *
+   * "Find a source", "Synonyms", "What is this about" were three separate
+   * hand-built widgets doing one thing: defer work that costs a request until
+   * someone asks for it, then replace yourself with the answer. Describing the
+   * shape once means the deferral survives onto a platform that cannot run the
+   * widget — which is the whole point, since deferring the cost is the reason
+   * they are buttons and not content.
+   */
+  disclosure: (b, api) => {
+    const wrap = el('div', {});
+    const panel = el('div', {});
+
+    const button = btn(b.label, async () => {
+      button.replaceWith(panel);
+      replaceContent(panel, spinner(b.busy || 'Working…'));
+      try {
+        replaceContent(panel, ...blocks(await b.run(api), api));
+      } catch (err) {
+        replaceContent(panel, api.errorFor
+          ? api.errorFor(err, () => { panel.replaceWith(button); button.click(); })
+          : errorBox(String(err?.message || err)));
+      }
+      api.resize?.();
+    }, { icon: b.icon });
+
+    wrap.append(button);
+    return wrap;
+  },
+
+  /**
+   * The follow-up thread.
+   *
+   * Every AI answer used to be a dead end, and this is what fixed it — so it
+   * being unavailable on the phone made the phone the lesser product for the
+   * exact reason the roadmap called out. It carries state across turns, which
+   * is why it resisted description: what crosses is not the conversation but
+   * the two turns it starts from, and each side runs its own.
+   */
+  conversation: (b, api) => {
+    const host = el('div', {});
+    followUp({ system: b.system, source: b.source, answer: b.answer }, api, host);
+    return host;
+  },
+
+  /**
+   * A picker that rebuilds the content under it — the language switcher.
+   *
+   * On its own line rather than inside the button row it used to share. That
+   * is a real if small layout change, and it buys the control existing at all
+   * away from the panel.
+   */
+  choice: (b, api) => {
+    const wrap = el('div', {});
+    const out = el('div', {});
+
+    const select = el('select', { class: 'hh-select', 'aria-label': b.label || 'Choose' },
+      ...b.options.map(([value, label]) =>
+        el('option', { value, selected: value === b.value }, label)));
+
+    /**
+     * Renders the current selection, and does so immediately rather than
+     * waiting to be changed.
+     *
+     * That is what makes this a picker over content rather than a control that
+     * sits above an empty space until touched. It is also what lets it express
+     * "here is the article I found, and here are the others" — an ambiguous
+     * term like "SLA" or "Mercury" is the normal case, not the exception, so
+     * the alternatives have to stay reachable without the first answer
+     * disappearing to make room for them.
+     */
+    const show = async (value) => {
+      replaceContent(out, spinner(b.busy || 'Working…'));
+      try {
+        replaceContent(out, ...blocks(await b.run(api, value), api));
+      } catch (err) {
+        replaceContent(out, api.errorFor
+          ? api.errorFor(err, () => show(value))
+          : errorBox(String(err?.message || err)));
+      }
+      api.resize?.();
+    };
+
+    select.addEventListener('change', () => show(select.value));
+
+    wrap.append(el('div', { class: 'hh-row' }, select), out);
+    show(b.value);
+    return wrap;
+  },
+
+  /**
+   * A QR code, as the module matrix rather than as a drawing.
+   *
+   * `encode()` already returns the grid; turning it into an SVG was a step this
+   * side happened to take. Sending the grid lets each platform draw it the way
+   * it draws things, and is a good deal smaller than the markup.
+   */
+  qrcode: (b) => el('div', { class: 'hh-qr' }, toSvgElement(b.modules)),
+
+  /**
+   * Read aloud. The browser has speech synthesis and so does Android; what
+   * they share is the text and the language, so that is what crosses.
+   */
+  speech: (b, api) => {
+    const wrap = el('div', { class: 'hh-row' });
+
+    const button = btn(isSpeaking() ? 'Stop' : 'Read aloud', () => {
+      if (isSpeaking()) {
+        stopSpeaking();
+        label(button, 'Read aloud');
+      } else {
+        speak(b.text, b.lang);
+        label(button, 'Stop');
+      }
+    }, { icon: 'speak', variant: 'hh-primary' });
+
+    wrap.append(button);
+    return wrap;
+  },
+
+  /**
+   * The escape hatch, for a view that genuinely cannot leave the browser.
+   *
+   * After the blocks above, exactly one thing still needs it: painting a
+   * highlight onto the page it came from, which has no meaning where there is
+   * no page. Android draws the `note` in its place.
    */
   custom: (b, api) => b.render(api)
 };
@@ -504,6 +626,12 @@ export function actionRow(text, api, extra = []) {
   });
 
   return el('div', { class: 'hh-row' }, copy, replace, ...extra);
+}
+
+/** Sets a button's visible text, which lives in its trailing span. */
+function label(button, text) {
+  const span = button.querySelector('span:last-child');
+  if (span) span.textContent = text;
 }
 
 function swap(button, temporary, original) {
@@ -779,6 +907,82 @@ export function followUp({ system, source, answer }, api, host) {
 
   host.append(thread, el('div', { class: 'hh-row' }, input, btn('Ask', ask, { variant: 'hh-primary' })));
   return thread;
+}
+
+/* ------------------------------------------------------------------ *
+ * Encyclopedia lookups, as blocks
+ *
+ * Three detectors offer "Find a source" and all three want the same thing:
+ * defer a Wikipedia lookup until asked, then render whatever came back. Living
+ * here rather than in each of them is not only to avoid three copies — it is
+ * so the *disambiguation* below exists once, because getting it wrong is
+ * invisible and getting it right is most of the value.
+ * ------------------------------------------------------------------ */
+
+function openArticle(api, url) {
+  if (api.openUrl) api.openUrl(url);
+  else openTab(url);
+}
+
+/** One article, rendered. */
+export function articleBlocks(article) {
+  return [
+    { type: 'label', text: `Wikipedia · ${article.lang}` },
+    { type: 'headline', text: article.title },
+    ...(article.description ? [{ type: 'sub', text: article.description }] : []),
+    { type: 'text', text: article.extract },
+    {
+      type: 'buttons',
+      items: [{
+        label: 'Open article',
+        icon: 'source',
+        variant: 'hh-primary',
+        run: (api) => openArticle(api, article.url)
+      }]
+    },
+    { type: 'note', text: 'An independent reference, not a citation for the explanation above.' }
+  ];
+}
+
+export function noArticleBlocks(term, links = []) {
+  return [
+    { type: 'note', text: `No encyclopedia article for “${term}”. Search instead:` },
+    {
+      type: 'buttons',
+      items: links.map((l) => ({ label: l.label, run: (api) => openArticle(api, l.url) }))
+    }
+  ];
+}
+
+/**
+ * The articles a lookup returned, with the alternatives kept reachable.
+ *
+ * Ambiguous terms are the normal case and not the exception — "SLA" and
+ * "Mercury" both have several plausible articles — so the panel must not
+ * quietly commit to one reading. A `choice` renders its current selection
+ * straight away and swaps on change, which is exactly the "here is what I
+ * found, here is what else it could be" shape, and it survives onto a platform
+ * that cannot rebuild a card in place.
+ */
+export function articlesBlocks(articles, term, links) {
+  if (!articles?.length) return noArticleBlocks(term, links);
+  if (articles.length === 1) return articleBlocks(articles[0]);
+
+  return [{
+    type: 'choice',
+    label: 'Did you mean',
+    value: '0',
+    options: articles.map((a, i) => [String(i), a.title]),
+    busy: 'Switching…',
+    run: (_api, index) => articleBlocks(articles[Number(index) || 0])
+  }];
+}
+
+/** Looks a term up and returns blocks describing the answer. */
+export async function lookupBlocks(api, term, context = '') {
+  const res = await api.send({ type: MSG.SOURCE, term, context });
+  if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
+  return articlesBlocks(res.articles || [], term, res.links);
 }
 
 /**

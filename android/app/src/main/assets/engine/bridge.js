@@ -283,6 +283,53 @@ function describeBlock(s, b) {
       return { type: 'menu', rows: (b.rows || []).map((r) => describeRow(s, r)) };
 
     /*
+     * Deferred work. The function stays here and an id crosses; Kotlin draws a
+     * button and calls `runBlocks` when it is pressed, which is the same
+     * bargain the panel makes — nothing costing a request runs until asked.
+     */
+    case 'disclosure':
+      return {
+        type: 'disclosure',
+        label: b.label,
+        icon: b.icon || null,
+        busy: b.busy || 'Working…',
+        action: register(b.run)
+      };
+
+    case 'choice':
+      return {
+        type: 'choice',
+        label: b.label || 'Choose',
+        value: b.value,
+        options: b.options || [],
+        busy: b.busy || 'Working…',
+        action: register(b.run)
+      };
+
+    /*
+     * A conversation crosses as the two turns it starts from, never as itself.
+     * Each side keeps its own history — the panel in a closure, Kotlin in this
+     * registry — because what has to be shared is where the thread begins, not
+     * how either of them is holding it.
+     */
+    case 'conversation': {
+      const id = `chat${++s.actionSeq}`;
+      s.chats.set(id, [
+        ...(b.system ? [{ role: 'system', content: b.system }] : []),
+        { role: 'user', content: b.source },
+        { role: 'assistant', content: b.answer }
+      ]);
+      return { type: 'conversation', chat: id };
+    }
+
+    // The grid, not a drawing of it — see kit.js.
+    case 'qrcode':
+      return { type: 'qrcode', modules: b.modules.map((row) => row.map((on) => (on ? 1 : 0))) };
+
+    case 'speech':
+      return { type: 'speech', text: b.text, lang: b.lang || null };
+
+    /*
      * The escape hatch, and the one thing that genuinely does not port. A
      * `custom` block builds DOM directly — the QR canvas, the "Find a source"
      * panel — so there is nothing here to describe. Kotlin draws a short note
@@ -355,7 +402,7 @@ const METHODS = {
     const s = {
       id, text, settings: merged, canReplace, url,
       rows: [], submenus: [], tasks: new Map(), actions: new Map(),
-      views: new Map(), actionSeq: 0
+      views: new Map(), chats: new Map(), actionSeq: 0
     };
     sessions.set(id, s);
 
@@ -455,6 +502,45 @@ const METHODS = {
     const fn = s.actions.get(action);
     if (!fn) throw new Error('That button is no longer live');
     return Promise.resolve(fn(apiFor(s))).then(() => true);
+  },
+
+  /**
+   * A disclosure being opened, or a choice being changed.
+   *
+   * Both resolve to a fresh list of blocks that replaces what was there, which
+   * is why they share a method: the difference between them is what the user
+   * pressed, not what comes back.
+   */
+  runBlocks({ session: id, action, value = null }) {
+    const s = session(id);
+    const fn = s.actions.get(action);
+    if (!fn) throw new Error('That control is no longer live');
+    return Promise.resolve(fn(apiFor(s), value))
+      .then((list) => (list || []).map((b) => describeBlock(s, b)).filter(Boolean));
+  },
+
+  /**
+   * One more turn in a follow-up thread.
+   *
+   * The history lives here and grows with each turn. A failed turn is popped
+   * back off, or the next question would carry an unanswered one and the model
+   * would try to answer both — the panel learned that the hard way.
+   */
+  ask({ session: id, chat, question }) {
+    const s = session(id);
+    const messages = s.chats.get(chat);
+    if (!messages) throw new Error('That conversation is no longer open');
+
+    messages.push({ role: 'user', content: String(question || '') });
+    return apiFor(s).chat(messages)
+      .then((res) => {
+        messages.push({ role: 'assistant', content: res.text });
+        return res.text;
+      })
+      .catch((err) => {
+        messages.pop();
+        throw err;
+      });
   },
 
   /** Lets Kotlin ask what a detector is called without hard-coding the list. */

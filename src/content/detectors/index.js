@@ -47,13 +47,23 @@
  *   { kind: 'stream', loading, run(api, emit), done(res, api) }
  *
  * and the block types are listed in kit.js: label, note, sub, quote, headline,
- * facts, steps, text, code, swatch, actions, buttons, menu, and `custom` as the
- * escape hatch for the few genuinely browser-shaped views.
+ * facts, steps, text, code, swatch, actions, buttons, menu, disclosure, choice,
+ * conversation, qrcode, speech, and `custom`.
  *
- * Reach for `custom` only when a view is genuinely a live widget — one that
- * runs on open, redraws itself, or owns state across turns. Using it to avoid
- * describing something that blocks could express costs the Android app a panel
- * for nothing.
+ * The last five exist because the same three shapes kept being hand-built and
+ * kept costing the Android app a panel:
+ *
+ *   disclosure    a button that becomes a panel — work deferred until asked
+ *   choice        a picker that rebuilds the content under it
+ *   conversation  a follow-up thread, described by the two turns it starts from
+ *   qrcode        the module grid, so each platform draws it its own way
+ *   speech        text and a language, so each platform says it its own way
+ *
+ * `custom` is now down to one legitimate use — painting a highlight onto the
+ * page it came from, which has no meaning where there is no page. Reaching for
+ * it anywhere else means a shape worth adding to this list instead: it is the
+ * only block a native renderer cannot draw, so every use of it is a feature the
+ * phone does not have.
  *
  * ---
  *

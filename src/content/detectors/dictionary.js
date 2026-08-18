@@ -15,7 +15,6 @@
  * already say the word.
  */
 
-import { el, btn, note, spinner, replaceContent, errorBox, copyButton } from '../kit.js';
 import { MSG } from '../../common/constants.js';
 import { speak, canSpeak } from '../speech.js';
 
@@ -109,45 +108,27 @@ function entryBlocks(word, res) {
        * Synonyms are a second request, so they wait for a second click. Most
        * lookups are "what does this mean", not "what else could I have said".
        *
-       * Kept as DOM because that deferral is the whole widget: the button
-       * replaces itself with a panel that then carries its own loading, result
-       * and error states. Describing it as blocks would mean either fetching
-       * the synonyms up front — the cost this design exists to avoid — or
-       * inventing a "button that becomes a panel" block that nothing else uses.
+       * A rejection is left to travel: the disclosure turns it into the
+       * panel's own error box rather than one built here.
        */
-      type: 'custom',
-      note: 'Synonyms need the browser panel.',
-      render: (api) => {
-        const host = el('div', {});
-        synonymButton(word, api, host);
-        return host;
+      type: 'disclosure',
+      label: 'Synonyms',
+      icon: 'book',
+      busy: 'Looking for synonyms…',
+      run: async (api) => {
+        const res = await api.send({ type: MSG.SYNONYMS, word, language: api.settings?.language });
+        if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
+        if (!res.words?.length) return [{ type: 'note', text: 'No synonyms found.' }];
+
+        const words = res.words.join(', ');
+        return [
+          { type: 'label', text: 'Synonyms' },
+          { type: 'text', text: words },
+          { type: 'buttons', items: [{ copy: words }] }
+        ];
       }
     }
   ];
-}
-
-function synonymButton(word, api, host) {
-  const panel = el('div', {});
-  const button = btn('Synonyms', async () => {
-    button.replaceWith(panel);
-    replaceContent(panel, spinner('Looking for synonyms…'));
-    try {
-      const res = await api.send({ type: MSG.SYNONYMS, word, language: api.settings?.language });
-      if (!res?.ok) throw new Error(res?.error || 'Lookup failed');
-      replaceContent(panel, res.words?.length
-        ? el('div', {},
-            el('div', { class: 'hh-label', text: 'Synonyms' }),
-            el('div', { class: 'hh-text', text: res.words.join(', ') }),
-            el('div', { class: 'hh-row' }, copyButton(res.words.join(', '), api)))
-        : note('No synonyms found.'));
-    } catch (err) {
-      replaceContent(panel, errorBox(String(err.message || err)));
-    }
-    api.resize?.();
-  }, { icon: 'book' });
-
-  host.append(el('div', { class: 'hh-row' }, button));
-  return button;
 }
 
 function noEntryBlocks(word, links) {

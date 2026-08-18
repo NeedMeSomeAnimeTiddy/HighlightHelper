@@ -9,7 +9,7 @@
  * language picker sits next to Copy/Replace for switching afterwards.
  */
 
-import { el, blocks, replaceContent, spinner, actionRow, provenance } from '../kit.js';
+import { provenance } from '../kit.js';
 import { LANGUAGES, languageName } from '../../common/languages.js';
 import { detectLanguage, baseTag } from './langdetect.js';
 import { AI } from '../../common/constants.js';
@@ -63,69 +63,37 @@ export default {
         ? `From ${languageName(match.detected)}`
         : 'Translation',
       detail: {
-        kind: 'async',
-        loading: `Translating into ${languageName(target)}…`,
-        run: (api) => translated(text, target, api)
+        kind: 'blocks',
+        blocks: [{
+          /*
+           * The picker owns the translation rather than sitting under one.
+           *
+           * A `choice` renders its current selection immediately, so the view
+           * is "translate into <language>: <answer>" from the first frame, and
+           * switching replaces the answer instead of adding a second one below
+           * the first. That is what the old in-place rebuild did, without
+           * needing a live <select> built into DOM the panel owns — and it
+           * means the control exists at all away from the panel.
+           */
+          type: 'choice',
+          label: 'Translate into',
+          value: target,
+          options: LANGUAGES,
+          busy: `Translating into ${languageName(target)}…`,
+          run: (api, code) => translateInto(text, code || target, api)
+        }]
       }
     }];
   }
 };
 
-/** One translation, described: which language it is, the text, then the row. */
-async function translated(text, target, api) {
+/** The answer itself: where it came from, what it says, what you can do with it. */
+async function translateInto(text, target, api) {
   const res = await api.ai(AI.TRANSLATE, text, { language: target });
 
   return [
     { type: 'label', text: `${languageName(target)}${provenance(res)}` },
     { type: 'text', text: res.text, rich: true },
-    {
-      /*
-       * Copy/Replace with the language picker on the end of the row, kept as
-       * DOM because the picker is the one genuinely live control here: it holds
-       * the current target and re-runs the whole translation when it changes.
-       *
-       * It also belongs *inside* the actions row rather than on a line of its
-       * own, which is the other reason an `actions` block plus something else
-       * cannot express it — `extra` takes buttons, and this is a <select>.
-       */
-      type: 'custom',
-      note: 'Switching language needs the browser panel.',
-      render: (api) => {
-        const picker = el('select', {
-          class: 'hh-select',
-          'aria-label': 'Translate into'
-        }, ...LANGUAGES.map(([code, name]) =>
-          el('option', { value: code, selected: code === target }, name)
-        ));
-
-        picker.addEventListener('change', () => retranslate(text, picker.value, api, picker));
-
-        return actionRow(res.text, api, [picker]);
-      }
-    }
+    { type: 'actions', text: res.text }
   ];
-}
-
-/**
- * Switching language, in place.
- *
- * The picker replaces the whole detail view — spinner, then the new answer —
- * exactly as picking the row did the first time, so the blocks are rendered
- * through the same `blocks()` the async view used rather than rebuilt by hand.
- * `from` is any node inside that view; the container is the panel's, not ours,
- * so it is found rather than held.
- */
-function retranslate(text, target, api, from) {
-  const box = from.closest('.hh-detail');
-  if (!box) return;
-
-  const run = () => {
-    replaceContent(box, spinner(`Translating into ${languageName(target)}…`));
-    translated(text, target, api).then(
-      (out) => replaceContent(box, el('div', {}, ...blocks(out, api))),
-      (err) => replaceContent(box, api.errorFor(err, run))
-    );
-  };
-
-  run();
 }

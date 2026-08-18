@@ -9,8 +9,9 @@
  * more annoying than a wrong hint in a prompt the model can ignore.
  */
 
-import { el, copyButton, topicSourceButton, provenance, followUp } from '../kit.js';
+import { provenance, lookupBlocks } from '../kit.js';
 import { AI } from '../../common/constants.js';
+import { parseTopics } from '../../common/text.js';
 import { isCode, guessLanguage } from './codelang.js';
 
 const MIN_CHARS = 24;
@@ -74,46 +75,52 @@ export default {
 function explainBlocks(text, res) {
   return [
     { type: 'text', text: res.text, rich: true },
-    {
-      /*
-       * Copy and "Find a source", kept together and kept as DOM.
-       *
-       * The source button appends itself *into* this row rather than sitting
-       * below it, and it only appears after the model has answered — so the row
-       * is not a fixed list of buttons that a `buttons` block could describe.
-       *
-       * A snippet has no encyclopedia title, so the topics are derived from it
-       * first — see kit.topicSourceButton. The explanation goes along as
-       * ranking context, the same as it does for a plain term.
-       */
-      type: 'custom',
-      note: '“Find a source” needs the browser panel.',
-      render: (api) => {
-        const actions = el('div', { class: 'hh-row' }, copyButton(res.text, api));
-        topicSourceButton(text, api, actions, { context: res.text });
-        return actions;
-      }
-    },
+    { type: 'buttons', items: [{ copy: res.text }] },
+    // A snippet has no encyclopedia title, so the topics are derived from it
+    // first. The explanation goes along as ranking context, the same as it
+    // does for a plain term.
+    topicSourceDisclosure(text, res.text),
     ...provenanceBlocks(res),
-    {
-      /*
-       * "What does line 4 do?" is the obvious next question, and until now
-       * there was nowhere to put it.
-       *
-       * A live conversation that owns its own state across turns, which is the
-       * other thing blocks cannot describe. Nothing is lost on Android by this
-       * today, because the AI path is not wired up there at all yet.
-       */
-      type: 'custom',
-      note: 'Follow-up questions need the browser panel.',
-      render: (api) => {
-        const host = el('div', {});
-        followUp({ source: text, answer: res.text }, api, host);
-        return host;
-      }
-    }
+    // "What does line 4 do?" is the obvious next question, and the thread is
+    // where it goes.
+    { type: 'conversation', source: text, answer: res.text }
   ];
 }
+
+/**
+ * "Find a source" for a selection with no obvious title.
+ *
+ * Searching Wikipedia for a whole snippet returns noise, so the model is asked
+ * what the code is *about* first. That is the one thing it can do here without
+ * risk: it picks the search term, and Wikipedia decides whether such an article
+ * exists. An invented topic simply finds nothing.
+ *
+ * Only the first topic is looked up, so the common case costs one search rather
+ * than three — and none at all until the button is pressed.
+ */
+function topicSourceDisclosure(text, context) {
+  return {
+    type: 'disclosure',
+    label: 'Find a source',
+    icon: 'source',
+    busy: 'Working out what this is about…',
+    run: async (api) => {
+      const res = await api.ai(AI.TOPICS, text);
+      const topics = parseTopics(res.text);
+      if (!topics.length) {
+        return [{ type: 'note', text: 'Nothing here that an encyclopedia would have an article on.' }];
+      }
+      return [
+        { type: 'sub', text: `In this text: ${topics[0]}` },
+        ...(await lookupBlocks(api, topics[0], context))
+      ];
+    }
+  };
+}
+
+
+
+
 
 /**
  * kit.provenanceNote as data — the same line, minus the DOM.
