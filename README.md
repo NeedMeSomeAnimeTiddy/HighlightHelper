@@ -2,6 +2,11 @@
 
 A Chrome extension (Manifest V3) that turns any text selection into something useful.
 
+There is also an **Android app** in [`android/`](android/), which hooks the system
+text-selection toolbar so the same tools work in every app on the phone rather than only in
+a browser. It is not a rewrite: the detectors below are copied in and run unmodified, so
+`npm test` covers both. See [ANDROID.md](ANDROID.md).
+
 Select text on a page and a small icon appears next to it. Click the icon and you get a
 menu of what you can do with that text — like a right-click menu, but built from what the
 selection actually is:

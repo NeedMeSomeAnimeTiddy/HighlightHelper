@@ -335,16 +335,31 @@ be kept verbatim.
 
 | Feature | Android | Note |
 | --- | --- | --- |
-| currency, unit, calc, numberbase, color, datetime, coords, decode, regex, texttools, code | **Free** | Pure JS, runs as-is |
-| qr | **Free** | The 489-line encoder ports; render its output to a Bitmap |
-| search / link — "Open in…" | **Free** | Chrome Custom Tabs instead of `window.open` |
-| dictionary, jargon, translate, summarize, rewrite, custom | **Free logic** | Network layer to Kotlin; prompts unchanged |
-| speak | **Better** | Android `TextToSpeech` beats the Web Speech API, and `getVoices()`'s empty-first-call quirk goes away |
-| replace | **Better** | Works in every app, not just editable fields |
-| **highlight** | **Degraded** | See below |
-| copy link to highlight | **Gone** | Needs a page to anchor into |
-| restore highlights on page load | **Gone** | Same |
-| per-site enable/disable | **Reshaped** | Becomes per-app, from the calling package |
+This was written as a forecast. The **State** column is what happened.
+
+| Feature | Forecast | State |
+| --- | --- | --- |
+| currency, unit, calc, numberbase, color, datetime, coords, decode, regex, texttools, code | Free | ✅ as predicted, pure JS unchanged |
+| qr | Free | ✅ — but as the module grid drawn on a Compose Canvas, not a Bitmap of an SVG |
+| search / link — "Open in…" | Free | ✅ Custom Tabs |
+| dictionary, jargon, translate, summarize, rewrite, custom | Free logic | ✅ — and cheaper than forecast: `wikipedia.js` and `dictionary.js` run *unmodified* behind a `fetch` shim, so only DeepSeek needed Kotlin |
+| speak | Better | ✅ `TextToSpeech`, and the `getVoices()` quirk is indeed gone |
+| replace | Better | ✅ works in any app's field |
+| **highlight** | Degraded | ✅ correctly predicted — the one thing that cannot port |
+| copy link to highlight | Gone | ✅ gone |
+| restore highlights on page load | Gone | ✅ gone |
+| per-site enable/disable | Reshaped | ⬜ not built; the calling package is available but unused |
+
+Two things the forecast missed, both discovered by running it:
+
+- **Wikimedia refuses generic user agents.** A browser sends its own, so the extension
+  never met this; OkHttp introduces itself as `okhttp/5.5.0` and gets a 403 on every
+  lookup. `Api-User-Agent` exists because browsers cannot set the real header and is no
+  substitute for it away from one.
+- **`View.post` does not run on a view that was never attached to a window.** The engine's
+  WebView is headless by design, so every reply to a request it made sat in a queue that
+  is only drained by `dispatchAttachedToWindow()`. Detection worked; everything it asked
+  for in return timed out.
 
 **Highlights are the real loss.** `anchor.js` and `locate.js` re-find a passage in a live
 document; a `PROCESS_TEXT` intent gives a string, no URL, and no DOM. Painting is impossible
@@ -396,16 +411,39 @@ same pattern covers the whole row list rather than one cell. Warm the WebView fr
 
 Each phase leaves something shippable, same rule as the roadmap.
 
-| Phase | What | Rough size |
+| Phase | What | State |
 | --- | --- | --- |
-| **A1** | Touch input, mobile panel layout, Firefox manifest, verify the three risks | ~1 week |
-| **A2** | AMO listing, on-device device probe messaging, real-device pass of `test/MANUAL.md` | ~1 week |
-| **B0** | The `rows()` refactor, in the extension, shipped on desktop first | ~2 weeks |
-| **B1** | Android skeleton: `PROCESS_TEXT` activity, headless WebView bridge, Compose sheet, the free detectors | ~2 weeks |
-| **B2** | Kotlin network layer, DeepSeek, streaming, cache, settings | ~2 weeks |
-| **B3** | ML Kit GenAI, TextToSpeech, Custom Tabs, share target | ~1 week |
-| **B4** | Clippings library, history, settings, Markdown export | ~1.5 weeks |
-| **B5** | Play Store: listing, privacy declaration, data-safety form | ~1 week |
+| **A1** | Touch input, mobile panel layout, Firefox manifest, verify the three risks | not started |
+| **A2** | AMO listing, on-device probe messaging, real-device pass of `test/MANUAL.md` | not started |
+| **B0** | The `rows()` refactor, in the extension, shipped on desktop first | ✅ built |
+| **B1** | Android skeleton: `PROCESS_TEXT` activity, headless WebView bridge, Compose sheet, the free detectors | ✅ built |
+| **B2** | Kotlin network layer, DeepSeek, streaming, cache, settings | ✅ built |
+| **B3** | TextToSpeech, Custom Tabs, share target | ✅ built — ML Kit GenAI not started |
+| **B4** | Clippings library, history, custom tools, Markdown export | not started |
+| **B5** | Play Store: listing, privacy declaration, data-safety form | not started |
+
+### What is actually running
+
+Every detector works on the phone except highlighting, which cannot. Conversions,
+calculator, colours, dates, coordinates, number bases, decoding, regex, text tools, QR,
+search and links run locally; currency, dictionary and the encyclopedia lookups go out
+through OkHttp; explain, translate, summarise, rewrite, the code tools and custom tools
+go to DeepSeek with the answer streaming in as it is written. Follow-up questions,
+"Find a source" with its disambiguation picker, the language switcher and read-aloud all
+work natively.
+
+What is missing, in the order it will be noticed:
+
+- **Custom tools cannot be created on the phone.** The detector runs them, and the
+  settings screen has nowhere to write one — that needs a prompt editor, which is a
+  screen rather than a row.
+- **Highlighting is absent and always will be** in this shape. It paints a range into
+  the document it came from, and an intent carries a string with no document. The
+  clippings library in B4 is the honest substitute.
+- **No on-device model.** Every AI call goes to DeepSeek, so the desktop promise that a
+  selection can stay on the machine has no equivalent here yet. ML Kit GenAI is the
+  route; see the provider table above.
+- **No history or library**, so nothing is kept after the sheet closes.
 
 **B0 before B1 is the load-bearing ordering.** It is tempting to skip it and let the Android
 app read `matches()` directly — that is Option 2 by the back door, and the drift starts on day
@@ -413,23 +451,31 @@ one.
 
 ---
 
-## Open questions to settle before writing code
+## Open questions — two answered, one still open
 
-Both tracks have one question each that changes the plan rather than the details, and both are
-answerable in an afternoon with a device.
+1. **Does `chrome.contextMenus` produce selection entries on Firefox for Android?**
+   *Still open.* Track A was never started, so this remains the thing to check first if
+   it ever is.
 
-1. **Does `chrome.contextMenus` produce selection entries on Firefox for Android?** If not, the
-   icon is the only way in on mobile Firefox and A1 needs more polish budget than it looks.
-2. **What does `PROCESS_TEXT` actually deliver from Chrome for Android?** Specifically: is
-   `EXTRA_PROCESS_TEXT_READONLY` false for a web text field, and does anything in the intent or
-   the calling package identify the page? The answer decides whether the clippings library has
-   provenance worth storing, and whether Replace is a headline feature or a footnote.
+2. **What does `PROCESS_TEXT` actually deliver from Chrome for Android?**
+   *Answered by building it.* `EXTRA_PROCESS_TEXT_READONLY` is honoured, and Replace
+   genuinely lands in another app's field — it is a headline feature, not a footnote.
+   Nothing in the intent identifies the page, which settles the other half: a clippings
+   library would have the calling package and no URL unless the text arrived by share.
 
-A third, cheaper to answer but worth knowing early:
+3. **Does a headless WebView survive long enough to be worth warming?**
+   *Answered, and it stopped mattering.* The sheet was written skeleton-first anyway —
+   header immediately, rows as they arrive — and at that point warming is invisible.
+   Keeping the engine on the `Application` is a cheap win for the second selection and
+   nothing depends on it.
 
-3. **Does a headless WebView survive Android's background restrictions long enough to be worth
-   warming?** If not, the skeleton-first sheet from *Cold-start latency* is not an optimisation
-   — it is the only design, and B1 should be written that way from the start.
+A fourth that nobody thought to ask, and cost the most:
+
+4. **Does the reply to a request the engine makes ever arrive?** Not through
+   `View.post` on a view that is never attached to a window. The lesson generalises past
+   Android: a headless component is one that has quietly opted out of every lifecycle the
+   framework assumes, and the parts that depend on those fail by hanging rather than by
+   throwing.
 
 ---
 
