@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Highlight Helper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Select text anywhere to convert currencies and units, explain jargon, translate, and rewrite with AI.",
   "minimum_chrome_version": "111",
 
