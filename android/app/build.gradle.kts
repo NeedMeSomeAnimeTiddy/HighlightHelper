@@ -1,3 +1,5 @@
+import java.util.Properties
+
 /*
  * No `org.jetbrains.kotlin.android` here on purpose.
  *
@@ -9,6 +11,23 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+}
+
+/*
+ * Release signing, from a file that is never committed.
+ *
+ * `android/keystore.properties` holds the store path and its passwords and is
+ * gitignored; without it the release build still runs and simply comes out
+ * unsigned, so a fresh clone is never broken by a key it cannot have. The
+ * alternative — passwords inline in this file — is how they end up in a public
+ * repository.
+ *
+ * Loaded out here rather than inside `android { }`: in there `java` resolves to
+ * Gradle's own java extension and shadows the package.
+ */
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
 }
 
 android {
@@ -27,10 +46,22 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (keystoreProperties.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

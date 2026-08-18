@@ -28,6 +28,8 @@ android/.idea/
 *.aab
 *.keystore
 *.jks
+# Holds the keystore passwords. Never commit it.
+android/keystore.properties
 # The engine is copied out of src/ by Gradle's syncEngine task. Committing it
 # would mean two copies of the detectors in one repo, and the stale one would
 # eventually be the one somebody read.
